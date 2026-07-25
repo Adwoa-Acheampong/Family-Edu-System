@@ -1,6 +1,6 @@
 {
-  "name": "",
-  "description": "",
+  "name": "Educational ERP Hub",
+  "description": "A multi-tenant educational platform featuring tailored UI templates, AI-driven learning goals, and progress tracking for the entire family.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

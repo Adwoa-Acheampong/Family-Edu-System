@@ -1,8 +1,19 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
+import React, { useState } from 'react';
+import { User } from './types';
+import { Login } from './components/Login';
+import { Layout } from './components/Layout';
+import { Dashboard } from './components/Dashboards';
 
 export default function App() {
-  return <div></div>;
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+
+  if (!currentUser) {
+    return <Login onLogin={setCurrentUser} />;
+  }
+
+  return (
+    <Layout user={currentUser} onLogout={() => setCurrentUser(null)}>
+      <Dashboard user={currentUser} />
+    </Layout>
+  );
 }
