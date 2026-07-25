@@ -1,4 +1,4 @@
-export type ThemeColor = 'gold' | 'emerald' | 'cyan' | 'amber' | 'purple' | 'lime';
+export type ThemeColor = 'gold' | 'emerald' | 'cyan' | 'amber' | 'purple' | 'lime' | 'sky';
 
 export interface User {
   id: string;

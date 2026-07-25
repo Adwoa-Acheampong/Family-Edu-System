@@ -2,8 +2,22 @@
 
 **Project:** Unified Family Educational ERP  
 **Repo:** `Adwoa-Acheampong/Family-Edu-System`  
-**Master Spec:** `SYSTEM_DOCUMENTATION.md` (root)  
+**Master Spec:** `SYSTEM_DOCUMENTATION.md` (root) + `docs/PERSONA_SETH.md`  
 **Updated:** 2026-07-25
+
+---
+
+## Family personas (7)
+
+| Name | Age | Persona | Theme |
+|------|-----|---------|--------|
+| Aba | 27 | The Architect | Gold |
+| Badu | 52 | The Master | Emerald |
+| Kobby | 11 | The Analyst | Cyan |
+| Pappy | 8 | The Explorer | Amber |
+| **Seth** | **6** | **The Adventurer** | **Sky** |
+| Kweku | 5 | The Discoverer | Purple |
+| Shee | 3 | The Seedling | Lime |
 
 ---
 
@@ -21,23 +35,23 @@
 
 ## Current Code Reality (as of this push)
 
-### Already done (mostly GenAI)
-- Multi-persona dashboards (Aba, Badu, Kobby, Pappy, Kweku, Shee)
+### Already done (mostly GenAI + Grok)
+- Multi-persona dashboards including **Seth (Adventurer)**
 - Layout, sidebar, storage progress bar, dark mode
-- Login (simple avatar/user picker)
-- AIAssistant UI shell (still **mocked** replies)
+- Login (simple avatar/user picker — includes Seth via `USERS`)
+- AIAssistant UI shell (still **mocked** replies until GenAI Priority 1)
 - ClassroomCard component
 - One live Gemini endpoint: `POST /api/suggest-goals` in `server.ts`
+- Grok: Tunnel runbook, Pages workflow, Playwright NotebookLM scaffold
 - Stack: React 19 + Vite 6 + Tailwind 4 + Express + `@google/genai`
 
 ### Not done yet
 - Real persona-aware AI chat
 - Submission flow
-- Interactive kid experiences (sounds/games)
+- Rich interactive kid experiences (including Seth)
 - Full Python Engine Room
 - Real Google OAuth / Drive / Classroom
-- Playwright NotebookLM
-- Cloudflare Tunnel + production PWA
+- Live Cloudflare Tunnel + production PWA
 
 ---
 
