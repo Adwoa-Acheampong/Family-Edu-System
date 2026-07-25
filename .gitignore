@@ -6,3 +6,18 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Playwright / NotebookLM session (never commit)
+scripts/playwright/.auth/
+scripts/playwright/.venv/
+**/storage_state.json
+
+# Cloudflare tunnel credentials
+**/.cloudflared/*.json
+**/credentials-file
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
