@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, Message } from '../types';
 import { X, Send, Bot, User as UserIcon, Maximize2, Minimize2 } from 'lucide-react';
 import { cn } from '../utils';
+import { sendChatMessage } from '../lib/api';
 
 interface AIAssistantProps {
   user: User;
@@ -13,11 +14,14 @@ export function AIAssistant({ user, isOpen, onClose }: AIAssistantProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const conversationIdRef = useRef<string | undefined>(undefined);
 
   // Reset messages when user changes or assistant opens
   useEffect(() => {
     if (isOpen && messages.length === 0) {
+      conversationIdRef.current = undefined;
       setMessages([
         {
           id: '1',
@@ -35,31 +39,57 @@ export function AIAssistant({ user, isOpen, onClose }: AIAssistantProps) {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, isTyping]);
 
-  const handleSend = () => {
-    if (!input.trim()) return;
+  const handleSend = async () => {
+    if (!input.trim() || isTyping) return;
+    
+    const messageText = input.trim();
     
     const newMsg: Message = {
       id: Date.now().toString(),
-      text: input,
+      text: messageText,
       sender: 'user',
       timestamp: new Date()
     };
     
     setMessages(prev => [...prev, newMsg]);
     setInput('');
+    setIsTyping(true);
     
-    // Simulate AI response delay
-    setTimeout(() => {
+    try {
+      const data = await sendChatMessage({
+        message: messageText,
+        persona: user.persona,
+        userName: user.name,
+        age: user.age,
+        learningFocus: user.learningFocus,
+        conversationId: conversationIdRef.current
+      });
+      
+      conversationIdRef.current = data.conversationId;
+      
       const aiResponse: Message = {
-        id: (Date.now() + 1).toString(),
-        text: `As your ${user.aiAssistantRole}, I am analyzing your request through the local Engine Room...`,
+        id: Date.now().toString(),
+        text: data.response,
         sender: 'ai',
         timestamp: new Date()
       };
       setMessages(prev => [...prev, aiResponse]);
-    }, 1200);
+    } catch (error) {
+      console.error(error);
+      const errorResponse: Message = {
+        id: Date.now().toString(),
+        text: user.age <= 8 
+          ? "Oops! Let's try again!" 
+          : "I encountered an error connecting to the Engine Room. Please try again.",
+        sender: 'ai',
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorResponse]);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -129,6 +159,21 @@ export function AIAssistant({ user, isOpen, onClose }: AIAssistantProps) {
             </div>
           </div>
         ))}
+        {isTyping && (
+          <div className="flex gap-3 max-w-[88%]">
+            <div 
+              className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-auto border"
+              style={{ borderColor: `${user.themeHex}50`, color: user.themeHex, backgroundColor: `${user.themeHex}15` }}
+            >
+              <Bot size={14} />
+            </div>
+            <div className="p-3.5 bg-black text-gray-300 rounded-2xl rounded-bl-sm border border-white/5 shadow-md flex items-center gap-1.5 h-11 px-4">
+              <span className="w-1.5 h-1.5 rounded-full bg-gray-500 animate-bounce" />
+              <span className="w-1.5 h-1.5 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '0.15s' }} />
+              <span className="w-1.5 h-1.5 rounded-full bg-gray-500 animate-bounce" style={{ animationDelay: '0.3s' }} />
+            </div>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
 

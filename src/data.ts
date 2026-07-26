@@ -50,18 +50,6 @@ export const USERS: User[] = [
     learningFocus: 'Basic math, science, reading',
   },
   {
-    id: 'seth',
-    name: 'Seth',
-    age: 6,
-    persona: 'The Adventurer',
-    theme: 'sky',
-    themeHex: '#0ea5e9',
-    avatarInitials: 'ST',
-    role: 'learner',
-    aiAssistantRole: 'Adventure Guide',
-    learningFocus: 'Early reading, counting, nature, simple games',
-  },
-  {
     id: 'kweku',
     name: 'Kweku',
     age: 5,
@@ -84,5 +72,17 @@ export const USERS: User[] = [
     role: 'learner',
     aiAssistantRole: 'Nurturer',
     learningFocus: 'Nursery rhymes, colors, animals',
+  },
+  {
+    id: 'seth',
+    name: 'Seth',
+    age: 6,
+    persona: 'The Adventurer',
+    theme: 'sky',
+    themeHex: '#0ea5e9',
+    avatarInitials: 'SE',
+    role: 'learner',
+    aiAssistantRole: 'Adventure Guide',
+    learningFocus: 'Early reading, counting, nature, simple games',
   }
 ];
