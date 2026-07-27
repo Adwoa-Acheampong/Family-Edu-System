@@ -1,51 +1,265 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { User } from '../types';
+import { getMockAssignments, getMockCourses } from '../data';
+import { ClassroomCard, Assignment } from './ClassroomCard';
+import { SubmissionWidget } from './SubmissionWidget';
+import { submitAssignment } from '../lib/api';
+import { BookOpen, Sparkles, Trophy, Target, Bot, Palette, GraduationCap } from 'lucide-react';
+import { cn } from '../utils';
 
 export function LearningHub({ user }: { user: User }) {
+  const courses = useMemo(() => getMockCourses(user.id), [user.id]);
+  const [assignments, setAssignments] = useState<Assignment[]>(() => getMockAssignments(user.id));
+  const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'DONE'>('ALL');
+  const [submitOpen, setSubmitOpen] = useState(false);
+  const [activeAssignment, setActiveAssignment] = useState<Assignment | null>(null);
+
+  React.useEffect(() => {
+    setAssignments(getMockAssignments(user.id));
+    setFilter('ALL');
+  }, [user.id]);
+
+  const filtered = assignments.filter((a) => {
+    if (filter === 'PENDING') return a.status === 'PENDING';
+    if (filter === 'DONE') return a.status !== 'PENDING';
+    return true;
+  });
+
+  const pendingCount = assignments.filter((a) => a.status === 'PENDING').length;
+  const isYoung = user.age <= 8;
+
+  const handleView = (id: string) => {
+    const a = assignments.find((x) => x.id === id);
+    if (!a) return;
+    setActiveAssignment(a);
+    if (a.status === 'PENDING') setSubmitOpen(true);
+  };
+
+  const handleSubmit = async (id: string, data: { textResponse?: string }) => {
+    try {
+      await submitAssignment('course_family', id, {
+        ...data,
+        userId: user.id,
+      });
+    } catch {
+      // Mock path still marks complete
+    }
+    setAssignments((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: 'SUBMITTED' as const } : a))
+    );
+  };
+
   return (
-    <div className="p-6 md:p-10 font-sans max-w-5xl mx-auto animate-in fade-in duration-300">
-      <h1 className="text-4xl md:text-5xl font-black tracking-tight text-gray-900 dark:text-white mb-6">Learning Hub</h1>
-      <div className="bg-white dark:bg-[#0a0a0a] border border-black/10 dark:border-white/10 rounded-3xl p-12 text-center shadow-xl">
-        <div className="text-6xl mb-6">📚</div>
-        <h2 className="text-2xl font-bold mb-3 text-gray-900 dark:text-white">Welcome to the Learning Hub, {user.name}!</h2>
-        <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto">Your curated courses, assignments, and educational materials will appear here.</p>
+    <div className="p-4 sm:p-6 md:p-10 font-sans max-w-6xl mx-auto animate-fade-in pb-24">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-[var(--theme-color)] mb-2">
+            Learning Hub
+          </div>
+          <h1 className="text-3xl md:text-5xl font-black tracking-tight text-gray-900 dark:text-white">
+            {isYoung ? `Let's learn, ${user.name}!` : `${user.name}'s courses`}
+          </h1>
+          <p className="text-gray-500 mt-2 text-sm md:text-base max-w-xl">
+            {isYoung
+              ? 'Pick a quest below. You can ask the Engine Room for help anytime.'
+              : 'Courses, assignments, and materials tailored to your focus.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="px-3 py-1.5 rounded-full text-xs font-bold border border-[var(--theme-color)]/30 bg-[var(--theme-color)]/10 text-[var(--theme-color)]">
+            {pendingCount} pending
+          </span>
+          <span className="px-3 py-1.5 rounded-full text-xs font-bold border border-black/10 dark:border-white/10 text-gray-500">
+            {courses.length} courses
+          </span>
+        </div>
       </div>
+
+      {/* Courses */}
+      <section className="mb-10">
+        <div className="flex items-center gap-2 mb-4">
+          <GraduationCap size={18} className="text-[var(--theme-color)]" />
+          <h2 className="text-sm font-bold uppercase tracking-widest text-gray-500">Courses</h2>
+        </div>
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {courses.map((c) => (
+            <div
+              key={c.id}
+              className="group relative overflow-hidden rounded-2xl border border-black/10 dark:border-white/10 bg-white dark:bg-[#0a0a0a] p-5 hover:border-[var(--theme-color)]/40 transition-all hover:-translate-y-0.5 shadow-sm"
+            >
+              <div className="text-3xl mb-3">{c.emoji}</div>
+              <h3 className="font-bold text-gray-900 dark:text-white mb-3">{c.title}</h3>
+              <div className="w-full h-1.5 rounded-full bg-gray-100 dark:bg-black overflow-hidden border border-black/5 dark:border-white/5">
+                <div
+                  className="h-full rounded-full bg-[var(--theme-color)] transition-all duration-700"
+                  style={{ width: `${c.progress}%` }}
+                />
+              </div>
+              <div className="flex justify-between mt-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                <span>Progress</span>
+                <span className="text-[var(--theme-color)]">{c.progress}%</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Assignments */}
+      <section>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-2">
+            <BookOpen size={18} className="text-[var(--theme-color)]" />
+            <h2 className="text-sm font-bold uppercase tracking-widest text-gray-500">Assignments</h2>
+          </div>
+          <div className="flex gap-1 p-1 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5">
+            {(['ALL', 'PENDING', 'DONE'] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors',
+                  filter === f
+                    ? 'bg-[var(--theme-color)] text-black'
+                    : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                )}
+              >
+                {f === 'DONE' ? 'Submitted' : f}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-black/10 dark:border-white/10 p-12 text-center">
+            <Trophy className="mx-auto mb-3 text-[var(--theme-color)]" size={32} />
+            <p className="font-bold text-gray-900 dark:text-white">All caught up!</p>
+            <p className="text-sm text-gray-500 mt-1">No assignments in this view.</p>
+          </div>
+        ) : (
+          <div className="grid md:grid-cols-2 gap-4">
+            {filtered.map((a) => (
+              <ClassroomCard
+                key={a.id}
+                assignment={a}
+                onView={handleView}
+                onHelp={() => {
+                  /* Layout AI is global; hint via focus */
+                  window.dispatchEvent(new CustomEvent('fes-open-ai'));
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <SubmissionWidget
+        isOpen={submitOpen}
+        onClose={() => {
+          setSubmitOpen(false);
+          setActiveAssignment(null);
+        }}
+        assignmentId={activeAssignment?.id || ''}
+        assignmentTitle={activeAssignment?.title || ''}
+        user={user}
+        onSubmit={handleSubmit}
+      />
     </div>
   );
 }
 
 export function MyProfile({ user }: { user: User }) {
+  const isYoung = user.age <= 8;
+
   return (
-    <div className="p-6 md:p-10 font-sans max-w-3xl mx-auto animate-in fade-in duration-300">
-      <h1 className="text-4xl md:text-5xl font-black tracking-tight text-gray-900 dark:text-white mb-6">My Profile</h1>
-      <div className="bg-white dark:bg-[#0a0a0a] border border-black/10 dark:border-white/10 rounded-3xl p-8 flex flex-col items-center shadow-xl relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-32 opacity-20" style={{ backgroundColor: user.themeHex }} />
-        
-        <div 
-          className="w-32 h-32 rounded-[2rem] flex items-center justify-center text-5xl font-bold mb-6 text-white relative z-10 shadow-2xl border-4 border-white/20 dark:border-black/20"
-          style={{ backgroundColor: user.themeHex }}
-        >
-          {user.avatarInitials}
+    <div className="p-4 sm:p-6 md:p-10 font-sans max-w-3xl mx-auto animate-fade-in pb-24">
+      <div className="text-[10px] font-bold uppercase tracking-[0.25em] text-[var(--theme-color)] mb-2">
+        Profile
+      </div>
+      <h1 className="text-3xl md:text-5xl font-black tracking-tight text-gray-900 dark:text-white mb-8">
+        {isYoung ? `This is ${user.name}` : 'My Profile'}
+      </h1>
+
+      <div className="bg-white dark:bg-[#0a0a0a] border border-black/10 dark:border-white/10 rounded-3xl overflow-hidden shadow-xl">
+        <div className="h-28 relative" style={{ background: `linear-gradient(135deg, ${user.themeHex}55, transparent)` }}>
+          <div className="absolute inset-0 bg-gradient-to-t from-white dark:from-[#0a0a0a] to-transparent" />
         </div>
-        <h2 className="text-3xl font-bold mb-1 text-gray-900 dark:text-white relative z-10">{user.name}</h2>
-        <div className="text-[var(--theme-color)] font-bold tracking-[0.2em] uppercase text-xs mb-8 relative z-10">{user.persona}</div>
-        
-        <div className="w-full space-y-6 text-left border-t border-black/5 dark:border-white/5 pt-8 relative z-10">
-          <div className="grid grid-cols-2 gap-6">
-            <div className="bg-gray-50 dark:bg-black/50 p-4 rounded-2xl border border-black/5 dark:border-white/5">
-              <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Age</div>
-              <div className="text-xl font-bold text-gray-900 dark:text-white">{user.age}</div>
-            </div>
-            <div className="bg-gray-50 dark:bg-black/50 p-4 rounded-2xl border border-black/5 dark:border-white/5">
-              <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Role</div>
-              <div className="text-xl font-bold text-gray-900 dark:text-white capitalize">{user.role}</div>
-            </div>
+
+        <div className="px-6 sm:px-8 pb-8 -mt-14 relative flex flex-col items-center text-center">
+          <div
+            className="w-28 h-28 rounded-[1.75rem] flex items-center justify-center text-4xl font-bold text-black shadow-2xl border-4 border-white dark:border-[#0a0a0a]"
+            style={{ backgroundColor: user.themeHex }}
+          >
+            {user.avatarInitials}
           </div>
-          <div className="bg-gray-50 dark:bg-black/50 p-4 rounded-2xl border border-black/5 dark:border-white/5">
-            <div className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-2">Learning Focus</div>
-            <div className="text-base font-medium text-gray-900 dark:text-white">{user.learningFocus}</div>
+          <h2 className="text-2xl sm:text-3xl font-bold mt-4 text-gray-900 dark:text-white">{user.name}</h2>
+          <div className="text-[var(--theme-color)] font-bold tracking-[0.2em] uppercase text-xs mt-1">
+            {user.persona}
+          </div>
+
+          <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-3 mt-8 text-left">
+            <Stat label="Age" value={String(user.age)} />
+            <Stat label="Role" value={user.role} />
+            <Stat label="Theme" value={user.theme} />
+            <Stat label="ID" value={user.id.toUpperCase()} />
+          </div>
+
+          <div className="w-full mt-6 space-y-3 text-left">
+            <InfoRow icon={<Target size={16} />} title="Learning focus" body={user.learningFocus} />
+            <InfoRow icon={<Bot size={16} />} title="AI companion" body={user.aiAssistantRole} />
+            <InfoRow
+              icon={<Palette size={16} />}
+              title="Theme color"
+              body={
+                <span className="inline-flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full border border-black/10" style={{ backgroundColor: user.themeHex }} />
+                  {user.themeHex}
+                </span>
+              }
+            />
+            <InfoRow
+              icon={<Sparkles size={16} />}
+              title="How you learn"
+              body={
+                isYoung
+                  ? 'Short games, stories, and lots of encouragement.'
+                  : user.role === 'admin'
+                    ? 'Strategic systems thinking and rapid iteration.'
+                    : 'Practical steps, practice, and clear feedback.'
+              }
+            />
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-gray-50 dark:bg-black/50 p-3 rounded-2xl border border-black/5 dark:border-white/5">
+      <div className="text-[9px] text-gray-500 font-bold uppercase tracking-widest mb-1">{label}</div>
+      <div className="text-sm font-bold text-gray-900 dark:text-white capitalize truncate">{value}</div>
+    </div>
+  );
+}
+
+function InfoRow({
+  icon,
+  title,
+  body,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  body: React.ReactNode;
+}) {
+  return (
+    <div className="flex gap-3 p-4 rounded-2xl bg-gray-50 dark:bg-black/40 border border-black/5 dark:border-white/5">
+      <div className="w-9 h-9 rounded-xl bg-[var(--theme-color)]/15 text-[var(--theme-color)] flex items-center justify-center shrink-0">
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <div className="text-[10px] font-bold uppercase tracking-widest text-gray-500 mb-0.5">{title}</div>
+        <div className="text-sm font-medium text-gray-900 dark:text-white">{body}</div>
       </div>
     </div>
   );
