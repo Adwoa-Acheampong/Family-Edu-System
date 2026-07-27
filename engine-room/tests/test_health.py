@@ -1,0 +1,89 @@
+"""Health endpoint tests for the Engine Room."""
+
+import os
+import tempfile
+from pathlib import Path
+
+import pytest
+import pytest_asyncio
+from httpx import AsyncClient, ASGITransport
+
+
+@pytest.fixture(autouse=True)
+def _test_env(monkeypatch):
+    """Set test environment variables."""
+    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "a" * 64)
+    # Use a temp file for the test database
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        db_path = f.name
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
+    yield
+    # Cleanup
+    Path(db_path).unlink(missing_ok=True)
+
+
+@pytest_asyncio.fixture
+async def client():
+    """Create an async test client."""
+    from main import app
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint(client: AsyncClient):
+    """GET /health should return {'status': 'ok'}."""
+    response = await client.get("/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data == {"status": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_health_method_not_allowed(client: AsyncClient):
+    """POST /health should return 405."""
+    response = await client.post("/health")
+    assert response.status_code == 405
+
+
+@pytest.mark.asyncio
+async def test_cors_headers(client: AsyncClient):
+    """Health endpoint should include CORS headers."""
+    response = await client.options(
+        "/health",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    # CORS headers should be present
+    assert "access-control-allow-origin" in response.headers
+
+
+@pytest.mark.asyncio
+async def test_drive_usage_no_auth(client: AsyncClient):
+    """GET /v1/drive-usage without auth should return 401."""
+    response = await client.get("/v1/drive-usage")
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_auth_url_endpoint(client: AsyncClient):
+    """GET /v1/auth/url should return a Google OAuth URL."""
+    response = await client.get("/v1/auth/url")
+    assert response.status_code == 200
+    data = response.json()
+    assert "url" in data
+    assert data["url"].startswith("https://accounts.google.com/o/oauth2/v2/auth")
+
+
+@pytest.mark.asyncio
+async def test_progress_analytics(client: AsyncClient):
+    """GET /v1/progress-analytics should return stub data."""
+    response = await client.get("/v1/progress-analytics")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["completionPercent"] == 0.0
+    assert data["currentStreak"] == 0
