@@ -8,10 +8,12 @@ import { cn } from '../utils';
 interface LayoutProps {
   user: User;
   onLogout: () => void;
+  activeTab: string;
+  onTabChange: (tab: string) => void;
   children: React.ReactNode;
 }
 
-export function Layout({ user, onLogout, children }: LayoutProps) {
+export function Layout({ user, onLogout, activeTab, onTabChange, children }: LayoutProps) {
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
@@ -103,24 +105,26 @@ export function Layout({ user, onLogout, children }: LayoutProps) {
             <div className="text-[10px] font-bold tracking-[0.2em] text-gray-500 dark:text-gray-600 uppercase mb-4 px-2">Navigation</div>
             <nav className="space-y-1.5 mb-8">
               {[
-                { name: 'Dashboard', icon: Grid, active: true },
-                { name: 'Learning Hub', icon: Search },
-                { name: 'My Profile', icon: UserCircle },
-              ].map((item, i) => (
-                <a 
+                { name: 'Dashboard', icon: Grid, id: 'dashboard' },
+                { name: 'Learning Hub', icon: Search, id: 'learning-hub' },
+                { name: 'My Profile', icon: UserCircle, id: 'profile' },
+              ].map((item, i) => {
+                const isActive = activeTab === item.id;
+                return (
+                <button 
                   key={i} 
-                  href="#" 
+                  onClick={() => onTabChange(item.id)}
                   className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors",
-                    item.active 
+                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left",
+                    isActive 
                       ? "bg-[var(--theme-color)]/10 text-[var(--theme-color)]" 
                       : "text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5"
                   )}
                 >
-                  <item.icon size={18} strokeWidth={item.active ? 2.5 : 2} />
+                  <item.icon size={18} strokeWidth={isActive ? 2.5 : 2} />
                   {item.name}
-                </a>
-              ))}
+                </button>
+              )})}
             </nav>
 
             <div className="text-[10px] font-bold tracking-[0.2em] text-gray-500 dark:text-gray-600 uppercase mb-4 px-2">Current Focus</div>
