@@ -25,7 +25,14 @@ In the app root `.env` / AI Studio secrets:
 VITE_ENGINE_ROOM_URL=http://localhost:8000
 ```
 
-`src/lib/api.ts` will route chat, classroom, drive, and curriculum to `/v1/*`.
+`src/lib/api.ts` routes chat, Classroom, Drive, curriculum, and lesson ingestion
+to `/v1/*`. The Learning Hub stays on demo data until a Google account is
+connected, then syncs live courses and assignments.
+
+For Google OAuth, register the exact frontend return URL from
+`GOOGLE_REDIRECT_URI` (locally, `http://localhost:3000/`). For Notebook lesson
+sources, also set `NOTEBOOKLM_PROJECT_NUMBER`; the cloud-platform scope is only
+requested when that setting is present.
 
 Authenticated Google calls send:
 
@@ -55,6 +62,8 @@ Authenticated Google calls send:
 | POST | `/v1/process-document` | Bearer |
 | POST | `/v1/ai-chat` | No (AI keys only) |
 | POST | `/v1/generate-curriculum` | No |
+| POST | `/v1/lessons/ingest` | Optional (required for Notebook) |
+| GET | `/v1/lessons?userId=` | No |
 | GET | `/v1/progress-analytics` | Optional |
 
 ## Security

@@ -32,3 +32,17 @@ Base: same origin (dev: `http://localhost:3000`)
 6. Pass `sessionId` into Drive/Classroom GETs
 
 Heavy multi-tenant token isolation should still move to the Python **Engine Room** (`docs/ENGINE_ROOM_WORK_ORDER.md`).
+
+## Production Engine Room path
+
+Set `VITE_ENGINE_ROOM_URL` in the frontend environment. The Learning Hub then
+uses the FastAPI Engine Room for:
+
+- OAuth authorization-code return handling with state validation
+- live Google Classroom course and assignment sync
+- Drive-backed file and typed-response attachments followed by Classroom turn-in
+- YouTube transcript ingestion and persisted lesson cards
+- optional Gemini Notebook Enterprise notebook/source creation
+
+Without `VITE_ENGINE_ROOM_URL`, the lightweight Node API and local demo data
+remain available for development.

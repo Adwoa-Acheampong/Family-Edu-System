@@ -6,6 +6,7 @@
  */
 
 const ENGINE_ROOM = (import.meta as any).env?.VITE_ENGINE_ROOM_URL as string | undefined;
+export const isEngineRoomConfigured = Boolean(ENGINE_ROOM);
 
 /** Optional Google session for Engine Room authenticated calls */
 let googleAccessToken: string | undefined;
@@ -21,7 +22,22 @@ export function setGoogleSession(accessToken?: string, userId?: string) {
     } catch {
       /* ignore */
     }
+  } else {
+    try {
+      localStorage.removeItem('fes_google_token');
+      localStorage.removeItem('fes_google_user_id');
+    } catch {
+      /* ignore */
+    }
   }
+}
+
+export function hasGoogleSession() {
+  return Boolean(googleAccessToken);
+}
+
+export function clearGoogleSession() {
+  setGoogleSession();
 }
 
 export function loadGoogleSessionFromStorage() {
@@ -40,6 +56,7 @@ function resolveUrl(path: string): string {
   if (!ENGINE_ROOM) return path;
   const er = ENGINE_ROOM.replace(/\/$/, '');
 
+  if (path === '/health') return `${er}/health`;
   if (path.startsWith('/v1/')) return `${er}${path}`;
 
   // Prefer Engine Room for these when available
@@ -178,7 +195,10 @@ export async function generateCurriculum(body: {
 export async function startGoogleOAuth() {
   if (ENGINE_ROOM) {
     const data = await apiGet('/v1/auth/url');
-    return { authorizationUrl: data.url };
+    if (data.state) {
+      localStorage.setItem('fes_google_oauth_state', data.state);
+    }
+    return { authorizationUrl: data.url, state: data.state };
   }
   return apiGet('/api/auth/google/start');
 }
@@ -200,4 +220,24 @@ export async function listDriveFiles(sessionId?: string) {
 export async function listClassroomCourses(sessionId?: string) {
   const q = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : '';
   return apiGet(`/api/google/classroom/courses${q}`);
+}
+
+export async function ingestLesson(body: {
+  userId: string;
+  persona: string;
+  youtubeUrl: string;
+  title?: string;
+  languages?: string[];
+  addToNotebook?: boolean;
+  notebookId?: string;
+}) {
+  if (!ENGINE_ROOM) {
+    throw new Error('Connect the Engine Room to ingest YouTube lessons');
+  }
+  return apiFetch('/v1/lessons/ingest', body);
+}
+
+export async function getLessons(userId: string) {
+  if (!ENGINE_ROOM) return { lessons: [] };
+  return apiGet(`/v1/lessons?userId=${encodeURIComponent(userId)}`);
 }

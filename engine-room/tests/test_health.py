@@ -1,34 +1,7 @@
 """Health endpoint tests for the Engine Room."""
 
-import os
-import tempfile
-from pathlib import Path
-
 import pytest
-import pytest_asyncio
-from httpx import AsyncClient, ASGITransport
-
-
-@pytest.fixture(autouse=True)
-def _test_env(monkeypatch):
-    """Set test environment variables."""
-    monkeypatch.setenv("TOKEN_ENCRYPTION_KEY", "a" * 64)
-    # Use a temp file for the test database
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-        db_path = f.name
-    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_path}")
-    yield
-    # Cleanup
-    Path(db_path).unlink(missing_ok=True)
-
-
-@pytest_asyncio.fixture
-async def client():
-    """Create an async test client."""
-    from main import app
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+from httpx import AsyncClient
 
 
 @pytest.mark.asyncio
@@ -76,6 +49,7 @@ async def test_auth_url_endpoint(client: AsyncClient):
     assert response.status_code == 200
     data = response.json()
     assert "url" in data
+    assert len(data["state"]) >= 16
     assert data["url"].startswith("https://accounts.google.com/o/oauth2/v2/auth")
 
 

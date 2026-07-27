@@ -8,11 +8,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -28,6 +30,10 @@ from models.schemas import (
     CurriculumResponse,
     DriveUsage,
     HealthResponse,
+    LessonIngestRequest,
+    LessonIngestResponse,
+    LessonListResponse,
+    LessonResource,
     OCRRequest,
     OCRResponse,
     ProgressAnalytics,
@@ -164,11 +170,12 @@ async def auth_refresh(request: AuthRefreshRequest):
 
 
 @app.get("/v1/auth/url")
-async def auth_url():
+async def auth_url(state: Optional[str] = Query(None, min_length=16, max_length=256)):
     try:
         from auth.google_auth import get_auth_url
 
-        return {"url": get_auth_url()}
+        url, oauth_state = get_auth_url(state)
+        return {"url": url, "state": oauth_state}
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
@@ -226,14 +233,14 @@ async def sync_classroom(
 ):
     token = await require_access_token(authorization, x_google_user_id)
     from auth.google_auth import build_google_client
-    from services.classroom import sync_assignments
+    from services.classroom import sync_classroom as sync_classroom_service
 
     try:
         classroom = build_google_client("classroom", "v1", token)
-        assignments = await asyncio.to_thread(
-            sync_assignments, classroom, course_id=request.courseId
+        courses, assignments = await asyncio.to_thread(
+            sync_classroom_service, classroom, course_id=request.courseId
         )
-        return SyncClassroomResponse(assignments=assignments)
+        return SyncClassroomResponse(courses=courses, assignments=assignments)
     except Exception as e:
         logger.error("Classroom sync failed: %s", e)
         raise HTTPException(status_code=502, detail="Failed to sync Classroom")
@@ -324,6 +331,103 @@ async def generate_curriculum(request: CurriculumRequest):
     except Exception as e:
         logger.error("Curriculum generation failed: %s", e)
         raise HTTPException(status_code=502, detail=f"Curriculum generation failed: {e}")
+
+
+@app.post("/v1/lessons/ingest", response_model=LessonIngestResponse)
+async def ingest_lesson(
+    request: LessonIngestRequest,
+    authorization: Optional[str] = Header(None),
+    x_google_user_id: Optional[str] = Header(None, alias="X-Google-User-Id"),
+):
+    """Turn a YouTube video into a persisted lesson and optional notebook source."""
+    from db.sqlite import save_lesson
+    from services.notebook import (
+        add_youtube_source,
+        create_notebook,
+        get_config,
+        notebook_url,
+    )
+    from services.youtube import fetch_transcript
+
+    try:
+        transcript = await fetch_transcript(request.youtubeUrl, request.languages)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    notebook_id = request.notebookId
+    source_id = None
+    notebook_link = None
+    notebook_status = "not_requested"
+    try:
+        notebook_config = get_config()
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+    if request.addToNotebook and notebook_config is None:
+        notebook_status = "not_configured"
+    elif request.addToNotebook:
+        token = await require_access_token(authorization, x_google_user_id)
+        try:
+            if not notebook_id:
+                created = await create_notebook(
+                    token, request.title or transcript.title
+                )
+                notebook_id = created.get("notebookId")
+                if not notebook_id and created.get("name"):
+                    notebook_id = created["name"].rstrip("/").split("/")[-1]
+            if not notebook_id:
+                raise RuntimeError("Notebook API did not return a notebook ID")
+
+            source = await add_youtube_source(
+                token, notebook_id, transcript.url
+            )
+            first_source = (source.get("sources") or [{}])[0]
+            raw_source_id = first_source.get("sourceId")
+            source_id = (
+                raw_source_id.get("id")
+                if isinstance(raw_source_id, dict)
+                else raw_source_id
+            )
+            notebook_status = (
+                first_source.get("settings", {}).get("status") or "submitted"
+            )
+            notebook_link = notebook_url(notebook_id)
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                "Gemini Notebook Enterprise rejected lesson source: %s",
+                e.response.status_code,
+            )
+            notebook_status = "error"
+        except Exception as e:
+            logger.error("Notebook lesson wiring failed: %s", e)
+            notebook_status = "error"
+
+    lesson = LessonResource(
+        id=str(uuid.uuid4()),
+        userId=request.userId,
+        persona=request.persona,
+        title=request.title or transcript.title,
+        youtubeUrl=transcript.url,
+        transcript=transcript,
+        notebookId=notebook_id,
+        notebookUrl=notebook_link,
+        notebookSourceId=source_id,
+        notebookStatus=notebook_status,
+        createdAt=datetime.now(timezone.utc),
+    )
+    await save_lesson(lesson)
+    return LessonIngestResponse(lesson=lesson)
+
+
+@app.get("/v1/lessons", response_model=LessonListResponse)
+async def get_lessons(
+    user_id: str = Query(..., alias="userId", min_length=1),
+):
+    from db.sqlite import list_lessons
+
+    return LessonListResponse(lessons=await list_lessons(user_id))
 
 
 @app.get("/v1/progress-analytics", response_model=ProgressAnalytics)

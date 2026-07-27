@@ -1,23 +1,89 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { User } from '../types';
 import { getMockAssignments, getMockCourses } from '../data';
 import { ClassroomCard, Assignment } from './ClassroomCard';
 import { SubmissionWidget } from './SubmissionWidget';
-import { submitAssignment } from '../lib/api';
-import { BookOpen, Sparkles, Trophy, Target, Bot, Palette, GraduationCap } from 'lucide-react';
+import { LessonBuilder } from './LessonBuilder';
+import {
+  hasGoogleSession,
+  isEngineRoomConfigured,
+  startGoogleOAuth,
+  submitAssignment,
+  syncClassroom,
+} from '../lib/api';
+import { BookOpen, Sparkles, Trophy, Target, Bot, Palette, GraduationCap, Loader2, RefreshCw } from 'lucide-react';
 import { cn } from '../utils';
 
+interface Course {
+  id: string;
+  title: string;
+  emoji: string;
+  progress: number;
+}
+
 export function LearningHub({ user }: { user: User }) {
-  const courses = useMemo(() => getMockCourses(user.id), [user.id]);
+  const [courses, setCourses] = useState<Course[]>(() => getMockCourses(user.id));
   const [assignments, setAssignments] = useState<Assignment[]>(() => getMockAssignments(user.id));
   const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'DONE'>('ALL');
   const [submitOpen, setSubmitOpen] = useState(false);
   const [activeAssignment, setActiveAssignment] = useState<Assignment | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState('');
+  const [liveClassroom, setLiveClassroom] = useState(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
+    setCourses(getMockCourses(user.id));
     setAssignments(getMockAssignments(user.id));
     setFilter('ALL');
+    setLiveClassroom(false);
   }, [user.id]);
+
+  const syncLiveClassroom = useCallback(async () => {
+    if (!isEngineRoomConfigured || !hasGoogleSession()) return;
+    setSyncing(true);
+    setSyncError('');
+    try {
+      const data = await syncClassroom(user.id);
+      const liveAssignments: Assignment[] = (data.assignments || []).map((assignment: any) => ({
+        id: assignment.id,
+        courseId: assignment.courseId,
+        courseName: assignment.courseName,
+        title: assignment.title,
+        description: assignment.description,
+        dueDate: assignment.dueDate,
+        alternateLink: assignment.alternateLink,
+        materials: assignment.materials,
+        points: assignment.maxPoints,
+        status:
+          assignment.submissionState === 'RETURNED'
+            ? 'GRADED'
+            : assignment.submissionState === 'TURNED_IN'
+              ? 'SUBMITTED'
+              : 'PENDING',
+      }));
+      const liveCourses: Course[] = (data.courses || []).map((course: any) => {
+        const courseAssignments = liveAssignments.filter((item) => item.courseId === course.id);
+        const completed = courseAssignments.filter((item) => item.status !== 'PENDING').length;
+        return {
+          id: course.id,
+          title: course.name,
+          emoji: '📚',
+          progress: courseAssignments.length ? Math.round((completed / courseAssignments.length) * 100) : 0,
+        };
+      });
+      setAssignments(liveAssignments);
+      setCourses(liveCourses);
+      setLiveClassroom(true);
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Classroom sync failed.');
+    } finally {
+      setSyncing(false);
+    }
+  }, [user.id]);
+
+  useEffect(() => {
+    void syncLiveClassroom();
+  }, [syncLiveClassroom]);
 
   const filtered = assignments.filter((a) => {
     if (filter === 'PENDING') return a.status === 'PENDING';
@@ -35,15 +101,19 @@ export function LearningHub({ user }: { user: User }) {
     if (a.status === 'PENDING') setSubmitOpen(true);
   };
 
-  const handleSubmit = async (id: string, data: { textResponse?: string }) => {
-    try {
-      await submitAssignment('course_family', id, {
-        ...data,
-        userId: user.id,
-      });
-    } catch {
-      // Mock path still marks complete
+  const handleSubmit = async (
+    id: string,
+    data: { textResponse?: string; file?: File; fileName?: string }
+  ) => {
+    const assignment = assignments.find((item) => item.id === id);
+    if (!assignment) throw new Error('Assignment not found.');
+    if (isEngineRoomConfigured && !assignment.courseId) {
+      throw new Error('This demo assignment cannot be submitted to Google Classroom.');
     }
+    await submitAssignment(assignment.courseId || 'course_family', id, {
+      ...data,
+      userId: user.id,
+    });
     setAssignments((prev) =>
       prev.map((a) => (a.id === id ? { ...a, status: 'SUBMITTED' as const } : a))
     );
@@ -66,6 +136,31 @@ export function LearningHub({ user }: { user: User }) {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {isEngineRoomConfigured && !hasGoogleSession() ? (
+            <button
+              onClick={async () => {
+                setSyncError('');
+                try {
+                  const { authorizationUrl } = await startGoogleOAuth();
+                  window.location.assign(authorizationUrl);
+                } catch (err) {
+                  setSyncError(err instanceof Error ? err.message : 'Could not start Google sign-in.');
+                }
+              }}
+              className="px-3 py-1.5 rounded-full text-xs font-bold border border-[var(--theme-color)]/30 bg-[var(--theme-color)]/10 text-[var(--theme-color)]"
+            >
+              Connect Google
+            </button>
+          ) : isEngineRoomConfigured ? (
+            <button
+              onClick={() => void syncLiveClassroom()}
+              disabled={syncing}
+              className="px-3 py-1.5 rounded-full text-xs font-bold border border-black/10 dark:border-white/10 text-gray-500 inline-flex items-center gap-1.5 disabled:opacity-50"
+            >
+              {syncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              {syncing ? 'Syncing' : 'Sync Classroom'}
+            </button>
+          ) : null}
           <span className="px-3 py-1.5 rounded-full text-xs font-bold border border-[var(--theme-color)]/30 bg-[var(--theme-color)]/10 text-[var(--theme-color)]">
             {pendingCount} pending
           </span>
@@ -73,6 +168,18 @@ export function LearningHub({ user }: { user: User }) {
             {courses.length} courses
           </span>
         </div>
+      </div>
+
+      <div className="mb-6 flex flex-wrap items-center gap-2 text-xs">
+        <span className={cn(
+          'rounded-full px-3 py-1.5 font-bold',
+          liveClassroom
+            ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+            : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+        )}>
+          {liveClassroom ? 'Live Google Classroom data' : 'Demo learning data'}
+        </span>
+        {syncError && <span role="alert" className="text-red-600 dark:text-red-400">{syncError}</span>}
       </div>
 
       {/* Courses */}
@@ -151,6 +258,8 @@ export function LearningHub({ user }: { user: User }) {
           </div>
         )}
       </section>
+
+      <LessonBuilder user={user} />
 
       <SubmissionWidget
         isOpen={submitOpen}

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Upload, X, Mic, Send, FileText, CheckCircle2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Upload, X, Send, FileText, CheckCircle2 } from 'lucide-react';
 import { User } from '../types';
 import { cn } from '../utils';
 
@@ -9,13 +9,28 @@ interface SubmissionWidgetProps {
   assignmentId: string;
   assignmentTitle: string;
   user: User;
-  onSubmit: (id: string, data: any) => Promise<void>;
+  onSubmit: (
+    id: string,
+    data: { textResponse?: string; file?: File; fileName?: string }
+  ) => Promise<void>;
 }
 
 export function SubmissionWidget({ isOpen, onClose, assignmentId, assignmentTitle, user, onSubmit }: SubmissionWidgetProps) {
   const [text, setText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [error, setError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setText('');
+      setFile(null);
+      setError('');
+      setIsSubmitted(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -23,20 +38,40 @@ export function SubmissionWidget({ isOpen, onClose, assignmentId, assignmentTitl
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (!isToddler && !text.trim() && !file) {
+      setError('Add a response or attach a file before turning this in.');
+      return;
+    }
+    setError('');
     setIsSubmitting(true);
     try {
-      await onSubmit(assignmentId, { textResponse: text });
+      await onSubmit(assignmentId, {
+        textResponse: text.trim() || undefined,
+        file: file || undefined,
+        fileName: file?.name,
+      });
       setIsSubmitted(true);
       setTimeout(() => {
         setIsSubmitted(false);
         setText('');
+        setFile(null);
         onClose();
       }, 1500);
     } catch (err) {
-      console.error(err);
+      setError(err instanceof Error ? err.message : 'Submission failed. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const selectFile = (candidate?: File) => {
+    if (!candidate) return;
+    if (candidate.size > 100 * 1024 * 1024) {
+      setError('That file is larger than 100 MB.');
+      return;
+    }
+    setFile(candidate);
+    setError('');
   };
 
   return (
@@ -90,13 +125,31 @@ export function SubmissionWidget({ isOpen, onClose, assignmentId, assignmentTitl
             <form onSubmit={handleSubmit} className="p-6">
               <div className="mb-6">
                 <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-widest mb-3">Upload File</label>
-                <div className="border-2 border-dashed border-gray-300 dark:border-white/20 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-gray-50 dark:hover:bg-white/5 transition-colors cursor-pointer">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    selectFile(event.dataTransfer.files?.[0]);
+                  }}
+                  className="w-full border-2 border-dashed border-gray-300 dark:border-white/20 rounded-2xl p-8 flex flex-col items-center justify-center text-center hover:bg-gray-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                >
                   <div className="w-12 h-12 bg-[var(--theme-color)]/10 text-[var(--theme-color)] rounded-full flex items-center justify-center mb-3">
-                    <Upload size={24} />
+                    {file ? <FileText size={24} /> : <Upload size={24} />}
                   </div>
-                  <div className="text-sm font-bold text-gray-900 dark:text-white mb-1">Click or drag file to this area to upload</div>
+                  <div className="text-sm font-bold text-gray-900 dark:text-white mb-1">
+                    {file ? file.name : 'Click or drag a file here'}
+                  </div>
                   <div className="text-xs text-gray-500">PDF, Word, Images, or Video (max 100MB)</div>
-                </div>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.txt,image/*,audio/*,video/*"
+                  onChange={(event) => selectFile(event.target.files?.[0])}
+                />
               </div>
               
               <div className="mb-6">
@@ -108,18 +161,18 @@ export function SubmissionWidget({ isOpen, onClose, assignmentId, assignmentTitl
                   className="w-full bg-gray-50 dark:bg-[#050505] border border-gray-200 dark:border-white/10 rounded-xl p-4 text-sm text-gray-900 dark:text-white focus:outline-none focus:border-[var(--theme-color)] min-h-[120px] resize-none"
                 />
               </div>
+
+              {error && (
+                <div role="alert" className="mb-4 rounded-xl bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-600 dark:text-red-400">
+                  {error}
+                </div>
+              )}
               
-              <div className="flex gap-3">
-                <button 
-                  type="button"
-                  className="flex-1 py-3 bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 font-bold text-xs uppercase tracking-wider rounded-xl hover:bg-gray-200 dark:hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
-                >
-                  <Mic size={16} /> Record Audio
-                </button>
+              <div className="flex justify-end">
                 <button 
                   type="submit"
                   disabled={isSubmitting}
-                  className="flex-1 py-3 bg-[var(--theme-color)] text-white dark:text-black font-bold text-xs uppercase tracking-wider rounded-xl hover:opacity-90 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="min-w-40 py-3 px-5 bg-[var(--theme-color)] text-white dark:text-black font-bold text-xs uppercase tracking-wider rounded-xl hover:opacity-90 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {isSubmitting ? 'Submitting...' : (
                     <>

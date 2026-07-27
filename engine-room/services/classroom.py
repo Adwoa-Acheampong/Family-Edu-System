@@ -13,7 +13,7 @@ from typing import Optional
 from googleapiclient.discovery import Resource
 from googleapiclient.errors import HttpError
 
-from models.schemas import Assignment, SubmissionResponse
+from models.schemas import Assignment, Course, SubmissionResponse
 
 logger = logging.getLogger("engine_room.classroom")
 
@@ -21,6 +21,7 @@ logger = logging.getLogger("engine_room.classroom")
 def sync_assignments(
     classroom: Resource,
     course_id: Optional[str] = None,
+    courses: Optional[list[dict]] = None,
 ) -> list[Assignment]:
     """Pull coursework from Google Classroom.
 
@@ -29,17 +30,18 @@ def sync_assignments(
     """
     assignments: list[Assignment] = []
 
-    try:
-        courses = _get_courses(classroom, course_id)
-    except HttpError as e:
-        logger.error("Failed to fetch courses: %s", e)
-        raise
+    if courses is None:
+        try:
+            courses = _get_courses(classroom, course_id)
+        except HttpError as e:
+            logger.error("Failed to fetch courses: %s", e)
+            raise
 
     for course in courses:
         cid = course["id"]
         try:
-            courseworks = classroom.courses().courseWork().list(courseId=cid).execute()
-            for cw in courseworks.get("courseWork", []):
+            courseworks = _get_coursework(classroom, cid)
+            for cw in courseworks:
                 # Try to get submission state for this student
                 submission_state = None
                 try:
@@ -47,7 +49,7 @@ def sync_assignments(
                         classroom.courses()
                         .courseWork()
                         .studentSubmissions()
-                        .list(courseId=cid, courseWorkId=cw["id"])
+                        .list(courseId=cid, courseWorkId=cw["id"], userId="me")
                         .execute()
                     )
                     sub_list = submissions.get("studentSubmissions", [])
@@ -68,12 +70,16 @@ def sync_assignments(
                 assignments.append(
                     Assignment(
                         id=cw["id"],
+                        courseId=cid,
+                        courseName=course.get("name"),
                         title=cw.get("title", "Untitled"),
                         description=cw.get("description"),
                         dueDate=due_date,
                         state=cw.get("state", "PUBLISHED"),
                         submissionState=submission_state,
                         maxPoints=cw.get("maxPoints"),
+                        alternateLink=cw.get("alternateLink"),
+                        materials=cw.get("materials", []),
                     )
                 )
         except HttpError as e:
@@ -82,6 +88,30 @@ def sync_assignments(
 
     logger.info("Synced %d assignments", len(assignments))
     return assignments
+
+
+def sync_classroom(
+    classroom: Resource,
+    course_id: Optional[str] = None,
+) -> tuple[list[Course], list[Assignment]]:
+    """Return normalized courses and their assignments in one API round-trip."""
+    raw_courses = _get_courses(classroom, course_id)
+    courses = [
+        Course(
+            id=course["id"],
+            name=course.get("name", "Untitled course"),
+            section=course.get("section"),
+            descriptionHeading=course.get("descriptionHeading"),
+            courseState=course.get("courseState", "ACTIVE"),
+            alternateLink=course.get("alternateLink"),
+        )
+        for course in raw_courses
+    ]
+    return courses, sync_assignments(
+        classroom,
+        course_id,
+        courses=raw_courses,
+    )
 
 
 def submit_assignment(
@@ -101,37 +131,22 @@ def submit_assignment(
     Flow:
       1. If file provided, upload to Drive Submissions folder
       2. Attach the Drive file to the Classroom submission
-      3. If text_response provided, set it as the submission text
+      3. If text_response provided, upload it as a text-file attachment
       4. Turn in the assignment
     """
     drive_file_id = None
-
-    # Step 1: Upload file to Drive if provided
-    if file_content and file_name and submissions_folder_id:
-        from .drive import upload_file as drive_upload_file
-        drive_file_id = drive_upload_file(
-            drive, file_content, file_name, file_mime_type or "application/octet-stream",
-            parent_folder_id=submissions_folder_id,
-        )
+    attachments: list[dict] = []
+    if (file_content or text_response) and not submissions_folder_id:
+        raise RuntimeError("Drive submissions folder is unavailable")
 
     try:
-        # Step 2 & 3: Modify the submission
-        submission_body: dict = {}
-
-        if drive_file_id:
-            submission_body["attachments"] = [
-                {"driveFile": {"id": drive_file_id, "title": file_name}}
-            ]
-
-        if text_response:
-            submission_body["textResponse"] = {"content": text_response}
-
-        # Get the student submission ID
+        # Resolve the submission before uploading, so an invalid Classroom target
+        # cannot leave orphaned files in Drive.
         submissions = (
             classroom.courses()
             .courseWork()
             .studentSubmissions()
-            .list(courseId=course_id, courseWorkId=course_work_id)
+            .list(courseId=course_id, courseWorkId=course_work_id, userId="me")
             .execute()
         )
         sub_list = submissions.get("studentSubmissions", [])
@@ -140,13 +155,49 @@ def submit_assignment(
 
         sub_id = sub_list[0]["id"]
 
-        if submission_body:
-            classroom.courses().courseWork().studentSubmissions().patch(
+        if file_content and file_name and submissions_folder_id:
+            from .drive import upload_file as drive_upload_file
+
+            drive_file_id = drive_upload_file(
+                drive,
+                file_content,
+                file_name,
+                file_mime_type or "application/octet-stream",
+                parent_folder_id=submissions_folder_id,
+            )
+            attachments.append(
+                {"driveFile": {"id": drive_file_id, "title": file_name}}
+            )
+
+        # Classroom does not expose a writable short-answer field for students.
+        # Preserve typed work as a text file and attach it to the submission.
+        if text_response and submissions_folder_id:
+            from .drive import upload_file as drive_upload_file
+
+            text_file_id = drive_upload_file(
+                drive,
+                text_response.encode("utf-8"),
+                f"response-{course_work_id}.txt",
+                "text/plain",
+                parent_folder_id=submissions_folder_id,
+            )
+            if drive_file_id is None:
+                drive_file_id = text_file_id
+            attachments.append(
+                {
+                    "driveFile": {
+                        "id": text_file_id,
+                        "title": f"response-{course_work_id}.txt",
+                    }
+                }
+            )
+
+        if attachments:
+            classroom.courses().courseWork().studentSubmissions().modifyAttachments(
                 courseId=course_id,
                 courseWorkId=course_work_id,
                 id=sub_id,
-                body=submission_body,
-                updateMask="attachments,textResponse.content",
+                body={"addAttachments": attachments},
             ).execute()
 
         # Step 4: Turn in
@@ -182,5 +233,31 @@ def _get_courses(classroom: Resource, course_id: Optional[str] = None) -> list[d
             logger.error("Course %s not found: %s", course_id, e)
             raise
 
-    result = classroom.courses().list(pageSize=100).execute()
-    return result.get("courses", [])
+    courses: list[dict] = []
+    page_token = None
+    while True:
+        result = classroom.courses().list(
+            pageSize=100,
+            pageToken=page_token,
+            courseStates=["ACTIVE"],
+        ).execute()
+        courses.extend(result.get("courses", []))
+        page_token = result.get("nextPageToken")
+        if not page_token:
+            return courses
+
+
+def _get_coursework(classroom: Resource, course_id: str) -> list[dict]:
+    coursework: list[dict] = []
+    page_token = None
+    while True:
+        result = classroom.courses().courseWork().list(
+            courseId=course_id,
+            pageSize=100,
+            pageToken=page_token,
+            courseWorkStates=["PUBLISHED"],
+        ).execute()
+        coursework.extend(result.get("courseWork", []))
+        page_token = result.get("nextPageToken")
+        if not page_token:
+            return coursework

@@ -4,9 +4,13 @@ import { cn } from '../utils';
 
 export interface Assignment {
   id: string;
+  courseId?: string;
+  courseName?: string;
   title: string;
   description?: string;
-  dueDate: string;
+  dueDate?: string;
+  alternateLink?: string;
+  materials?: unknown[];
   status: 'PENDING' | 'SUBMITTED' | 'GRADED';
   points?: number;
 }
@@ -33,13 +37,22 @@ export function ClassroomCard({ assignment, className, onView, onHelp }: Classro
         
         <div className="flex-1 min-w-0">
           <h4 className="text-sm font-bold text-gray-900 dark:text-white mb-1 truncate">{assignment.title}</h4>
+          {assignment.courseName && (
+            <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--theme-color)] mb-2 truncate">
+              {assignment.courseName}
+            </div>
+          )}
           
           <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500 mb-3">
-            <div className="flex items-center gap-1">
-              <Clock size={12} />
-              <span>Due {new Date(assignment.dueDate).toLocaleDateString()}</span>
-            </div>
-            {assignment.points && (
+            {assignment.dueDate ? (
+              <div className="flex items-center gap-1">
+                <Clock size={12} />
+                <span>Due {new Date(assignment.dueDate).toLocaleDateString()}</span>
+              </div>
+            ) : (
+              <span>No due date</span>
+            )}
+            {assignment.points !== undefined && (
               <div className="font-bold text-[var(--theme-color)]">{assignment.points} XP</div>
             )}
           </div>

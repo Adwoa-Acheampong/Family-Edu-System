@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlencode
@@ -41,7 +42,7 @@ def _get_client_config() -> dict:
         "client_secret": client_secret,
         "redirect_uri": os.environ.get(
             "GOOGLE_REDIRECT_URI",
-            "http://localhost:8000/v1/auth/callback",
+            "http://localhost:3000/",
         ),
     }
 
@@ -166,14 +167,22 @@ def build_google_client(service_name: str, version: str, access_token: str) -> R
     return build(service_name, version, credentials=creds, cache_discovery=False)
 
 
-def get_auth_url() -> str:
+def get_auth_url(state: Optional[str] = None) -> tuple[str, str]:
     config = _get_client_config()
+    oauth_state = state or secrets.token_urlsafe(32)
+    scopes = list(SCOPES)
+    if os.environ.get("NOTEBOOKLM_PROJECT_NUMBER"):
+        scopes.append("https://www.googleapis.com/auth/cloud-platform")
     params = {
         "client_id": config["client_id"],
         "redirect_uri": config["redirect_uri"],
         "response_type": "code",
-        "scope": " ".join(SCOPES),
+        "scope": " ".join(scopes),
         "access_type": "offline",
         "prompt": "consent",
+        "state": oauth_state,
     }
-    return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
+    return (
+        f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}",
+        oauth_state,
+    )

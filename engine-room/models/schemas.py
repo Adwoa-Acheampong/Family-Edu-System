@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -40,14 +40,27 @@ class AuthRefreshResponse(BaseModel):
 
 # ─── Classroom / Assignments ────────────────────────────────────────────
 
+class Course(BaseModel):
+    id: str
+    name: str
+    section: Optional[str] = None
+    descriptionHeading: Optional[str] = None
+    courseState: str = "ACTIVE"
+    alternateLink: Optional[str] = None
+
+
 class Assignment(BaseModel):
     id: str
+    courseId: str
+    courseName: Optional[str] = None
     title: str
     description: Optional[str] = None
     dueDate: Optional[datetime] = None
     state: str = "PUBLISHED"
     submissionState: Optional[str] = None
-    maxPoints: Optional[int] = None
+    maxPoints: Optional[float] = None
+    alternateLink: Optional[str] = None
+    materials: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class SyncClassroomRequest(BaseModel):
@@ -55,6 +68,7 @@ class SyncClassroomRequest(BaseModel):
 
 
 class SyncClassroomResponse(BaseModel):
+    courses: list[Course] = Field(default_factory=list)
     assignments: list[Assignment]
 
 
@@ -133,6 +147,55 @@ class CurriculumRequest(BaseModel):
 class CurriculumResponse(BaseModel):
     studyMaterials: list[StudyMaterial]
     assignment: AssignmentDraft
+
+
+class TranscriptSegment(BaseModel):
+    text: str
+    start: float
+    duration: float
+
+
+class YouTubeTranscript(BaseModel):
+    videoId: str
+    title: str
+    url: str
+    language: str
+    languageCode: str
+    isGenerated: bool
+    transcript: str
+    segments: list[TranscriptSegment]
+
+
+class LessonIngestRequest(BaseModel):
+    userId: str
+    persona: str
+    youtubeUrl: str
+    title: Optional[str] = None
+    languages: list[str] = Field(default_factory=lambda: ["en"])
+    addToNotebook: bool = True
+    notebookId: Optional[str] = None
+
+
+class LessonResource(BaseModel):
+    id: str
+    userId: str
+    persona: str
+    title: str
+    youtubeUrl: str
+    transcript: YouTubeTranscript
+    notebookId: Optional[str] = None
+    notebookUrl: Optional[str] = None
+    notebookSourceId: Optional[str] = None
+    notebookStatus: str = "not_requested"
+    createdAt: datetime
+
+
+class LessonIngestResponse(BaseModel):
+    lesson: LessonResource
+
+
+class LessonListResponse(BaseModel):
+    lessons: list[LessonResource]
 
 
 # ─── Progress / Analytics ───────────────────────────────────────────────

@@ -22,7 +22,6 @@ except ImportError:
 
 logger = logging.getLogger("engine_room.db")
 
-_DB_PATH: str | None = None
 _fernet: Fernet | None = None
 
 
@@ -50,14 +49,10 @@ def _get_fernet() -> Fernet:
 
 
 def get_db_path() -> str:
-    global _DB_PATH
-    if _DB_PATH is None:
-        url = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./engine_room.db")
-        if ":///" in url:
-            _DB_PATH = url.split(":///", 1)[1]
-        else:
-            _DB_PATH = "./engine_room.db"
-    return _DB_PATH
+    url = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./engine_room.db")
+    if ":///" in url:
+        return url.split(":///", 1)[1]
+    return "./engine_room.db"
 
 
 async def init_db() -> None:
@@ -97,6 +92,16 @@ async def init_db() -> None:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS lessons (
+                lesson_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                lesson_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_lessons_user_created
+                ON lessons(user_id, created_at DESC);
             """
         )
         await db.commit()
@@ -210,3 +215,40 @@ async def save_conversation(
             (conversation_id, google_user_id, persona, title),
         )
         await db.commit()
+
+
+async def save_lesson(lesson) -> None:
+    """Persist a validated LessonResource without splitting nested transcript data."""
+    if aiosqlite is None:
+        raise ImportError("aiosqlite is required")
+    await init_db()
+    async with aiosqlite.connect(get_db_path()) as db:
+        await db.execute(
+            """INSERT OR REPLACE INTO lessons
+               (lesson_id, user_id, lesson_json, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (
+                lesson.id,
+                lesson.userId,
+                lesson.model_dump_json(),
+                lesson.createdAt.isoformat(),
+            ),
+        )
+        await db.commit()
+
+
+async def list_lessons(user_id: str):
+    if aiosqlite is None:
+        raise ImportError("aiosqlite is required")
+    from models.schemas import LessonResource
+
+    await init_db()
+    async with aiosqlite.connect(get_db_path()) as db:
+        cursor = await db.execute(
+            """SELECT lesson_json FROM lessons
+               WHERE user_id = ?
+               ORDER BY created_at DESC""",
+            (user_id,),
+        )
+        rows = await cursor.fetchall()
+    return [LessonResource.model_validate_json(row[0]) for row in rows]
