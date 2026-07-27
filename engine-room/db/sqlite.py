@@ -1,12 +1,13 @@
 """Encrypted token and profile store using SQLite + Fernet.
 
-Stores Google OAuth tokens encrypted at rest. Each user's tokens are
-keyed by their Google user ID. The encryption key is provided via the
-TOKEN_ENCRYPTION_KEY environment variable (32-byte hex).
+TOKEN_ENCRYPTION_KEY must be 64 hex characters (32 bytes).
+We derive a valid Fernet key via url-safe base64 encoding of those bytes.
+Generate: python -c "import secrets; print(secrets.token_hex(32))"
 """
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 from datetime import datetime, timezone
@@ -22,36 +23,44 @@ except ImportError:
 logger = logging.getLogger("engine_room.db")
 
 _DB_PATH: str | None = None
-_encryption_key: bytes | None = None
+_fernet: Fernet | None = None
 
 
 def _get_fernet() -> Fernet:
-    global _encryption_key
-    if _encryption_key is None:
-        raw = os.environ.get("TOKEN_ENCRYPTION_KEY", "")
-        if len(raw) != 64:
-            raise RuntimeError(
-                "TOKEN_ENCRYPTION_KEY must be a 32-byte hex string (64 hex chars). "
-                "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
-            )
-        _encryption_key = bytes.fromhex(raw)
-    return Fernet(_encryption_key)
+    """Build Fernet from TOKEN_ENCRYPTION_KEY (64 hex chars → 32 bytes → urlsafe b64)."""
+    global _fernet
+    if _fernet is not None:
+        return _fernet
+
+    raw = os.environ.get("TOKEN_ENCRYPTION_KEY", "").strip()
+    if len(raw) != 64:
+        raise RuntimeError(
+            "TOKEN_ENCRYPTION_KEY must be a 32-byte hex string (64 hex chars). "
+            'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+        )
+    try:
+        key_bytes = bytes.fromhex(raw)
+    except ValueError as e:
+        raise RuntimeError("TOKEN_ENCRYPTION_KEY must be valid hex") from e
+
+    # Fernet requires url-safe base64-encoded 32-byte key
+    fernet_key = base64.urlsafe_b64encode(key_bytes)
+    _fernet = Fernet(fernet_key)
+    return _fernet
 
 
 def get_db_path() -> str:
     global _DB_PATH
     if _DB_PATH is None:
         url = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./engine_room.db")
-        # Handle sqlite+aiosqlite:///path or sqlite:///path
         if ":///" in url:
-            _DB_PATH = url.split(":///")[1]
+            _DB_PATH = url.split(":///", 1)[1]
         else:
             _DB_PATH = "./engine_room.db"
     return _DB_PATH
 
 
 async def init_db() -> None:
-    """Create tables if they don't exist."""
     if aiosqlite is None:
         raise ImportError("aiosqlite is required. Install with: pip install aiosqlite")
 
@@ -59,7 +68,8 @@ async def init_db() -> None:
     logger.info("Initializing database at %s", db_path)
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
-        await db.executescript("""
+        await db.executescript(
+            """
             CREATE TABLE IF NOT EXISTS tokens (
                 google_user_id TEXT PRIMARY KEY,
                 access_token_encrypted TEXT NOT NULL,
@@ -87,12 +97,11 @@ async def init_db() -> None:
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
-        """)
+            """
+        )
         await db.commit()
     logger.info("Database initialized successfully")
 
-
-# ─── Token store ───────────────────────────────────────────────────────
 
 async def save_tokens(
     google_user_id: str,
@@ -100,11 +109,10 @@ async def save_tokens(
     refresh_token: str,
     expires_in: int = 3600,
 ) -> None:
-    """Encrypt and store OAuth tokens."""
     if aiosqlite is None:
         raise ImportError("aiosqlite is required")
     fernet = _get_fernet()
-    expiry = datetime.now(timezone.utc).timestamp() + expires_in
+    expiry = datetime.now(timezone.utc).timestamp() + max(expires_in - 60, 60)
     expiry_str = datetime.fromtimestamp(expiry, tz=timezone.utc).isoformat()
 
     async with aiosqlite.connect(get_db_path()) as db:
@@ -116,7 +124,7 @@ async def save_tokens(
             (
                 google_user_id,
                 fernet.encrypt(access_token.encode()).decode(),
-                fernet.encrypt(refresh_token.encode()).decode(),
+                fernet.encrypt((refresh_token or "").encode()).decode(),
                 expiry_str,
             ),
         )
@@ -124,11 +132,6 @@ async def save_tokens(
 
 
 async def get_tokens(google_user_id: str) -> Optional[dict]:
-    """Retrieve and decrypt tokens for a user.
-
-    Returns dict with keys: access_token, refresh_token, token_expiry
-    or None if not found.
-    """
     if aiosqlite is None:
         raise ImportError("aiosqlite is required")
     fernet = _get_fernet()
@@ -152,15 +155,12 @@ async def get_tokens(google_user_id: str) -> Optional[dict]:
 
 
 async def delete_tokens(google_user_id: str) -> None:
-    """Remove a user's tokens (e.g. on logout)."""
     if aiosqlite is None:
         raise ImportError("aiosqlite is required")
     async with aiosqlite.connect(get_db_path()) as db:
         await db.execute("DELETE FROM tokens WHERE google_user_id = ?", (google_user_id,))
         await db.commit()
 
-
-# ─── Profile store ─────────────────────────────────────────────────────
 
 async def save_profile(
     google_user_id: str,
@@ -169,7 +169,6 @@ async def save_profile(
     picture: Optional[str] = None,
     persona: Optional[str] = None,
 ) -> None:
-    """Store or update a user profile."""
     if aiosqlite is None:
         raise ImportError("aiosqlite is required")
     async with aiosqlite.connect(get_db_path()) as db:
@@ -183,7 +182,6 @@ async def save_profile(
 
 
 async def get_profile(google_user_id: str) -> Optional[dict]:
-    """Retrieve a user profile."""
     if aiosqlite is None:
         raise ImportError("aiosqlite is required")
     async with aiosqlite.connect(get_db_path()) as db:
@@ -196,15 +194,12 @@ async def get_profile(google_user_id: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
-# ─── Conversation store ────────────────────────────────────────────────
-
 async def save_conversation(
     conversation_id: str,
     google_user_id: str,
     persona: str,
     title: Optional[str] = None,
 ) -> None:
-    """Track a conversation session."""
     if aiosqlite is None:
         raise ImportError("aiosqlite is required")
     async with aiosqlite.connect(get_db_path()) as db:

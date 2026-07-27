@@ -1,9 +1,6 @@
 """Family Educational ERP — AI Engine Room
 
-FastAPI orchestrator that sits between the React dashboard and
-Google Workspace / OCR / LLMs.
-
-Run with: uvicorn main:app --reload --port 8000
+Run: uvicorn main:app --reload --port 8000
 """
 
 from __future__ import annotations
@@ -15,7 +12,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import httpx
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -40,8 +37,6 @@ from models.schemas import (
     UserProfile,
 )
 
-# ─── Logging ────────────────────────────────────────────────────────────
-
 log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=getattr(logging, log_level, logging.INFO),
@@ -51,14 +46,15 @@ logging.basicConfig(
 logger = logging.getLogger("engine_room")
 
 
-# ─── App lifecycle ─────────────────────────────────────────────────────
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and shutdown events."""
     logger.info("Engine Room starting up...")
-    await init_db()
-    logger.info("Engine Room ready on port 8000")
+    # Soft-init: allow health without TOKEN_ENCRYPTION_KEY during first boot docs
+    try:
+        await init_db()
+    except Exception as e:
+        logger.warning("DB init deferred/failed: %s", e)
+    logger.info("Engine Room ready")
     yield
     logger.info("Engine Room shutting down...")
 
@@ -66,11 +62,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Family Edu Engine Room",
     description="Local AI orchestrator for the Family Educational ERP",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
-
-# ─── CORS ───────────────────────────────────────────────────────────────
 
 cors_origins = os.environ.get(
     "CORS_ORIGINS", "http://localhost:5173,http://localhost:3000"
@@ -78,70 +72,64 @@ cors_origins = os.environ.get(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in cors_origins],
+    allow_origins=[o.strip() for o in cors_origins if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
-# ─── Helpers ────────────────────────────────────────────────────────────
-
-def _google_user_id_from_token(authorization: Optional[str]) -> str:
-    """Extract the Google user ID from the stored token.
-
-    In development, this looks up the token from the DB by decoding it.
-    For production, validate the JWT access token against Google's tokeninfo.
-    """
+async def require_access_token(
+    authorization: Optional[str] = None,
+    x_google_user_id: Optional[str] = None,
+) -> str:
+    """Extract Bearer token and optionally auto-refresh via stored user tokens."""
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+        raise HTTPException(
+            status_code=401, detail="Missing or invalid Authorization header"
+        )
+    bearer = authorization.removeprefix("Bearer ").strip()
+    if not bearer:
+        raise HTTPException(status_code=401, detail="Empty Bearer token")
 
-    # For Phase 1/2 local dev, we use the token as a lookup into the DB.
-    # The frontend sends the access_token which we stored during auth exchange.
-    # In production, validate with: https://oauth2.googleapis.com/tokeninfo?id_token=...
-    # For now, we return the raw token for the service functions to use.
-    token = authorization.removeprefix("Bearer ")
+    from auth.google_auth import resolve_access_token
 
-    # If we have a stored user, we can look up tokens
-    # For simplicity, we just return the token — the services use it directly.
-    return token
+    return await resolve_access_token(bearer, x_google_user_id)
 
-
-# ─── Health ─────────────────────────────────────────────────────────────
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     return HealthResponse(status="ok")
 
 
-# ─── Auth ───────────────────────────────────────────────────────────────
-
 @app.post("/v1/auth/exchange-code", response_model=AuthExchangeResponse)
 async def auth_exchange(request: AuthExchangeRequest):
-    """Exchange an OAuth authorization code for access and refresh tokens."""
     try:
         from auth.google_auth import exchange_code
+
         result = await exchange_code(request.code)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except httpx.HTTPStatusError as e:
         logger.error("OAuth exchange failed: %s", e)
         raise HTTPException(status_code=400, detail="Failed to exchange authorization code")
 
-    # Store tokens encrypted
     user = result["user"]
-    await save_tokens(
-        google_user_id=user["id"],
-        access_token=result["access_token"],
-        refresh_token=result["refresh_token"],
-        expires_in=result["expires_in"],
-    )
-
-    # Store profile
-    await save_profile(
-        google_user_id=user["id"],
-        display_name=user["name"],
-        email=user["email"],
-        picture=user.get("picture"),
-    )
+    try:
+        await save_tokens(
+            google_user_id=user["id"],
+            access_token=result["access_token"],
+            refresh_token=result["refresh_token"],
+            expires_in=result["expires_in"],
+        )
+        await save_profile(
+            google_user_id=user["id"],
+            display_name=user["name"],
+            email=user["email"],
+            picture=user.get("picture"),
+        )
+    except Exception as e:
+        logger.warning("Could not persist tokens/profile: %s", e)
 
     logger.info("User %s authenticated successfully", user["email"])
     return AuthExchangeResponse(
@@ -159,10 +147,12 @@ async def auth_exchange(request: AuthExchangeRequest):
 
 @app.post("/v1/auth/refresh", response_model=AuthRefreshResponse)
 async def auth_refresh(request: AuthRefreshRequest):
-    """Refresh an expired access token using a refresh token."""
     try:
         from auth.google_auth import refresh_access_token
+
         result = await refresh_access_token(request.refresh_token)
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except httpx.HTTPStatusError as e:
         logger.error("Token refresh failed: %s", e)
         raise HTTPException(status_code=400, detail="Failed to refresh token")
@@ -175,35 +165,37 @@ async def auth_refresh(request: AuthRefreshRequest):
 
 @app.get("/v1/auth/url")
 async def auth_url():
-    """Get the Google OAuth consent URL (for frontend redirect)."""
-    from auth.google_auth import get_auth_url
-    return {"url": get_auth_url()}
+    try:
+        from auth.google_auth import get_auth_url
 
+        return {"url": get_auth_url()}
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
-# ─── Drive ──────────────────────────────────────────────────────────────
 
 @app.get("/v1/drive-usage", response_model=DriveUsage)
-async def drive_usage(authorization: Optional[str] = None):
-    """Get the authenticated user's Drive storage quota."""
-    token = _google_user_id_from_token(authorization)
-
+async def drive_usage(
+    authorization: Optional[str] = Header(None),
+    x_google_user_id: Optional[str] = Header(None, alias="X-Google-User-Id"),
+):
+    token = await require_access_token(authorization, x_google_user_id)
     from auth.google_auth import build_google_client
     from services.drive import get_drive_usage
 
     try:
         drive = build_google_client("drive", "v3", token)
-        usage = await asyncio.to_thread(get_drive_usage, drive)
-        return usage
+        return await asyncio.to_thread(get_drive_usage, drive)
     except Exception as e:
         logger.error("Drive usage check failed: %s", e)
         raise HTTPException(status_code=502, detail="Failed to fetch Drive usage")
 
 
 @app.post("/v1/drive/ensure-folders")
-async def ensure_drive_folders(authorization: Optional[str] = None):
-    """Ensure the Educational ERP folder tree exists for the user."""
-    token = _google_user_id_from_token(authorization)
-
+async def ensure_drive_folders(
+    authorization: Optional[str] = Header(None),
+    x_google_user_id: Optional[str] = Header(None, alias="X-Google-User-Id"),
+):
+    token = await require_access_token(authorization, x_google_user_id)
     from auth.google_auth import build_google_client
     from services.drive import ensure_folder_tree
 
@@ -226,24 +218,20 @@ async def ensure_drive_folders(authorization: Optional[str] = None):
         raise HTTPException(status_code=502, detail="Failed to create Drive folders")
 
 
-# ─── Classroom ──────────────────────────────────────────────────────────
-
 @app.post("/v1/sync-classroom", response_model=SyncClassroomResponse)
 async def sync_classroom(
     request: SyncClassroomRequest,
-    authorization: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+    x_google_user_id: Optional[str] = Header(None, alias="X-Google-User-Id"),
 ):
-    """Pull assignments from Google Classroom."""
-    token = _google_user_id_from_token(authorization)
-
+    token = await require_access_token(authorization, x_google_user_id)
     from auth.google_auth import build_google_client
     from services.classroom import sync_assignments
 
     try:
         classroom = build_google_client("classroom", "v1", token)
         assignments = await asyncio.to_thread(
-            sync_assignments, classroom,
-            course_id=request.courseId,
+            sync_assignments, classroom, course_id=request.courseId
         )
         return SyncClassroomResponse(assignments=assignments)
     except Exception as e:
@@ -257,18 +245,17 @@ async def handle_submit_assignment(
     courseWorkId: str = Form(...),
     textResponse: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
-    authorization: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+    x_google_user_id: Optional[str] = Header(None, alias="X-Google-User-Id"),
 ):
-    """Submit an assignment: upload file to Drive, attach to Classroom, turn in."""
-    token = _google_user_id_from_token(authorization)
-
+    token = await require_access_token(authorization, x_google_user_id)
     from auth.google_auth import build_google_client
     from services.classroom import submit_assignment as classroom_submit
+    from services.drive import ensure_folder_tree
 
     file_content = None
     file_name = None
     file_mime_type = None
-
     if file and file.filename:
         file_content = await file.read()
         file_name = file.filename
@@ -277,15 +264,16 @@ async def handle_submit_assignment(
     try:
         classroom = build_google_client("classroom", "v1", token)
         drive = build_google_client("drive", "v3", token)
-
-        # Get the submissions folder (last in the folder tree)
-        from services.drive import ensure_folder_tree
         folder_ids = await asyncio.to_thread(ensure_folder_tree, drive)
         submissions_folder_id = folder_ids[3] if len(folder_ids) > 3 else None
 
         result = await asyncio.to_thread(
             classroom_submit,
-            classroom, drive, courseId, courseWorkId, token,
+            classroom,
+            drive,
+            courseId,
+            courseWorkId,
+            token,
             file_content=file_content,
             file_name=file_name,
             file_mime_type=file_mime_type,
@@ -298,69 +286,51 @@ async def handle_submit_assignment(
         raise HTTPException(status_code=502, detail=f"Failed to submit assignment: {e}")
 
 
-# ─── OCR ────────────────────────────────────────────────────────────────
-
 @app.post("/v1/process-document", response_model=OCRResponse)
 async def process_document(
     request: OCRRequest,
-    authorization: Optional[str] = None,
+    authorization: Optional[str] = Header(None),
+    x_google_user_id: Optional[str] = Header(None, alias="X-Google-User-Id"),
 ):
-    """OCR a document from Google Drive using Baidu OCR."""
-    token = _google_user_id_from_token(authorization)
-
+    token = await require_access_token(authorization, x_google_user_id)
     from auth.google_auth import build_google_client
     from services.ocr import process_document as ocr_process
 
     try:
         drive = build_google_client("drive", "v3", token)
-        result = await ocr_process(drive, request.driveFileId, request.fileType)
-        return result
+        return await ocr_process(drive, request.driveFileId, request.fileType)
     except Exception as e:
         logger.error("OCR processing failed: %s", e)
         raise HTTPException(status_code=502, detail=f"OCR failed: {e}")
 
 
-# ─── AI Chat ────────────────────────────────────────────────────────────
-
 @app.post("/v1/ai-chat", response_model=ChatResponse)
-async def ai_chat(
-    request: ChatRequest,
-    authorization: Optional[str] = None,
-):
-    """Persona-aware AI chat via OpenRouter or Gemini."""
+async def ai_chat(request: ChatRequest):
     from services.ai_chat import chat as ai_chat_service
 
     try:
-        result = await ai_chat_service(request)
-        return result
+        return await ai_chat_service(request)
     except Exception as e:
         logger.error("AI chat failed: %s", e)
         raise HTTPException(status_code=502, detail=f"AI chat failed: {e}")
 
 
-# ─── Curriculum ─────────────────────────────────────────────────────────
-
 @app.post("/v1/generate-curriculum", response_model=CurriculumResponse)
-async def generate_curriculum(
-    request: CurriculumRequest,
-    authorization: Optional[str] = None,
-):
-    """Generate study materials and an assignment draft."""
+async def generate_curriculum(request: CurriculumRequest):
     from services.curriculum import generate_curriculum as curriculum_service
 
     try:
-        result = await curriculum_service(request)
-        return result
+        return await curriculum_service(request)
     except Exception as e:
         logger.error("Curriculum generation failed: %s", e)
         raise HTTPException(status_code=502, detail=f"Curriculum generation failed: {e}")
 
 
-# ─── Progress / Analytics ──────────────────────────────────────────────
-
 @app.get("/v1/progress-analytics", response_model=ProgressAnalytics)
-async def progress_analytics(authorization: Optional[str] = None):
-    """Return student progress metrics (stub for Phase 1/2)."""
+async def progress_analytics(
+    authorization: Optional[str] = Header(None),
+):
+    # Auth optional for stub; keep Header so clients can send it later
     return ProgressAnalytics(
         completionPercent=0.0,
         currentStreak=0,
@@ -368,8 +338,6 @@ async def progress_analytics(authorization: Optional[str] = None):
         completedAssignments=0,
     )
 
-
-# ─── Error handlers ────────────────────────────────────────────────────
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request, exc: HTTPException):
@@ -391,10 +359,9 @@ async def generic_exception_handler(request, exc: Exception):
     )
 
 
-# ─── Entrypoint ────────────────────────────────────────────────────────
-
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "main:app",
         host="0.0.0.0",

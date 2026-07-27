@@ -1,13 +1,15 @@
 """Google OAuth 2.0 handler.
 
-Handles code exchange, token refresh, and Google API client creation.
-Tokens are stored encrypted via the db/sqlite.py module.
+Handles code exchange, token refresh, valid-token resolution, and API clients.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime, timezone
+from typing import Optional
+from urllib.parse import urlencode
 
 import httpx
 from google.oauth2.credentials import Credentials
@@ -30,10 +32,13 @@ _OAUTH_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
 
 def _get_client_config() -> dict:
-    """Load Google OAuth client config from environment."""
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+    if not client_id or not client_secret:
+        raise RuntimeError("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set")
     return {
-        "client_id": os.environ["GOOGLE_CLIENT_ID"],
-        "client_secret": os.environ["GOOGLE_CLIENT_SECRET"],
+        "client_id": client_id,
+        "client_secret": client_secret,
         "redirect_uri": os.environ.get(
             "GOOGLE_REDIRECT_URI",
             "http://localhost:8000/v1/auth/callback",
@@ -42,10 +47,6 @@ def _get_client_config() -> dict:
 
 
 async def exchange_code(code: str) -> dict:
-    """Exchange an OAuth authorization code for tokens.
-
-    Returns dict with keys: access_token, refresh_token, expires_in, and user info.
-    """
     config = _get_client_config()
 
     async with httpx.AsyncClient() as client:
@@ -63,7 +64,6 @@ async def exchange_code(code: str) -> dict:
         resp.raise_for_status()
         token_data = resp.json()
 
-    # Fetch user profile with the access token
     async with httpx.AsyncClient() as client:
         user_resp = await client.get(
             _OAUTH_USERINFO_URL,
@@ -88,10 +88,6 @@ async def exchange_code(code: str) -> dict:
 
 
 async def refresh_access_token(refresh_token: str) -> dict:
-    """Refresh an expired access token.
-
-    Returns dict with keys: access_token, expires_in.
-    """
     config = _get_client_config()
 
     async with httpx.AsyncClient() as client:
@@ -115,18 +111,62 @@ async def refresh_access_token(refresh_token: str) -> dict:
     }
 
 
-def build_google_client(service_name: str, version: str, access_token: str) -> Resource:
-    """Build an authenticated Google API client.
+async def resolve_access_token(
+    bearer_token: str,
+    google_user_id: Optional[str] = None,
+) -> str:
+    """Return a usable Google access token.
 
-    Example:
-        drive_service = build_google_client('drive', 'v3', token)
+    If google_user_id is provided, load encrypted tokens from DB and
+    refresh when past token_expiry. Otherwise pass through the Bearer token.
     """
+    if not google_user_id:
+        return bearer_token
+
+    from db.sqlite import get_tokens, save_tokens
+
+    stored = await get_tokens(google_user_id)
+    if not stored:
+        return bearer_token
+
+    expiry_raw = stored.get("token_expiry") or ""
+    needs_refresh = True
+    try:
+        expiry = datetime.fromisoformat(expiry_raw)
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        needs_refresh = datetime.now(timezone.utc) >= expiry
+    except ValueError:
+        needs_refresh = True
+
+    if not needs_refresh:
+        return stored["access_token"] or bearer_token
+
+    refresh = stored.get("refresh_token") or ""
+    if not refresh:
+        logger.warning("Token expired for %s but no refresh_token", google_user_id)
+        return bearer_token
+
+    try:
+        result = await refresh_access_token(refresh)
+        await save_tokens(
+            google_user_id=google_user_id,
+            access_token=result["access_token"],
+            refresh_token=refresh,
+            expires_in=result.get("expires_in", 3600),
+        )
+        return result["access_token"]
+    except Exception as e:
+        logger.error("Auto-refresh failed for %s: %s", google_user_id, e)
+        return bearer_token
+
+
+def build_google_client(service_name: str, version: str, access_token: str) -> Resource:
     creds = Credentials(token=access_token)
-    return build(service_name, version, credentials=creds)
+    return build(service_name, version, credentials=creds, cache_discovery=False)
 
 
 def get_auth_url() -> str:
-    """Generate the Google OAuth consent URL for the frontend to redirect to."""
     config = _get_client_config()
     params = {
         "client_id": config["client_id"],
@@ -136,5 +176,4 @@ def get_auth_url() -> str:
         "access_type": "offline",
         "prompt": "consent",
     }
-    query = "&".join(f"{k}={v}" for k, v in params.items())
-    return f"https://accounts.google.com/o/oauth2/v2/auth?{query}"
+    return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"

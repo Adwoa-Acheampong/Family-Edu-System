@@ -6,3 +6,20 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Python / Engine Room
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+engine-room/.venv/
+engine-room/engine_room.db
+engine-room/**/*.db
+.pytest_cache/
+
+# Playwright / tunnel secrets
+scripts/playwright/.auth/
+**/storage_state.json
+**/.cloudflared/*.json

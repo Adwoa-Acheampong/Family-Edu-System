@@ -1,8 +1,4 @@
-"""AI Chat service.
-
-Handles persona-aware AI chat via OpenRouter (primary) or Gemini (fallback).
-Injects system prompts based on persona from SYSTEM_DOCUMENTATION §13.
-"""
+"""AI Chat service — OpenRouter primary, Gemini fallback. Persona-normalized."""
 
 from __future__ import annotations
 
@@ -18,7 +14,6 @@ logger = logging.getLogger("engine_room.ai_chat")
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Persona → OpenRouter model mapping
 PERSONA_MODEL_MAP: dict[str, str] = {
     "Architect": "anthropic/claude-3.5-sonnet",
     "Master": "meta-llama/llama-3-70b-instruct",
@@ -28,7 +23,6 @@ PERSONA_MODEL_MAP: dict[str, str] = {
     "Seedling": "google/gemini-2.0-flash-001",
     "Adventurer": "google/gemini-2.0-flash-001",
 }
-
 
 PERSONA_SYSTEM_PROMPTS: dict[str, str] = {
     "Architect": (
@@ -67,57 +61,66 @@ PERSONA_SYSTEM_PROMPTS: dict[str, str] = {
         "You are a gentle nurturer for a 3-year-old. "
         "Use very short phrases, simple words. "
         "Sing nursery rhymes, talk about animals, colors, and everyday things. "
-        "Be warm, gentle, and reassuring. Use lots of emojis 🌸"
+        "Be warm, gentle, and reassuring. Use lots of emojis."
     ),
 }
 
 
-async def chat(request: ChatRequest) -> ChatResponse:
-    """Process a chat message with persona-aware AI.
+def normalize_persona(persona: str, ai_assistant_role: str | None = None) -> str:
+    """Map 'The Architect' / role strings → Architect, Adventurer, etc."""
+    blob = f"{persona or ''} {ai_assistant_role or ''}".lower()
+    if "architect" in blob or "strategic" in blob:
+        return "Architect"
+    if "master" in blob or "patient companion" in blob:
+        return "Master"
+    if "analyst" in blob or "tech mentor" in blob:
+        return "Analyst"
+    if "explorer" in blob or "storyteller" in blob:
+        return "Explorer"
+    if "adventurer" in blob or "adventure guide" in blob:
+        return "Adventurer"
+    if "discoverer" in blob or "playmate" in blob:
+        return "Discoverer"
+    if "seedling" in blob or "nurturer" in blob:
+        return "Seedling"
+    # Exact key match (already normalized)
+    for key in PERSONA_SYSTEM_PROMPTS:
+        if key.lower() == (persona or "").strip().lower():
+            return key
+    return "Architect"
 
-    Uses OpenRouter by default, falls back to Gemini if OpenRouter key is missing.
-    """
+
+async def chat(request: ChatRequest) -> ChatResponse:
     conversation_id = request.conversationId or str(uuid.uuid4())
+    persona_key = normalize_persona(request.persona)
     system_prompt = PERSONA_SYSTEM_PROMPTS.get(
-        request.persona,
+        persona_key,
         "You are a helpful assistant for a family learning platform.",
     )
 
-    # Prefer OpenRouter
     openrouter_key = os.environ.get("OPENROUTER_API_KEY")
     if openrouter_key:
         response_text = await _chat_openrouter(
-            request.message, system_prompt, request.persona, openrouter_key,
+            request.message, system_prompt, persona_key, openrouter_key
         )
     else:
-        # Fallback to Gemini
         gemini_key = os.environ.get("GEMINI_API_KEY")
         if gemini_key:
-            response_text = await _chat_gemini(
-                request.message, system_prompt, gemini_key,
-            )
+            response_text = await _chat_gemini(request.message, system_prompt, gemini_key)
         else:
-            logger.warning(
-                "No AI API keys configured (OPENROUTER_API_KEY or GEMINI_API_KEY)"
-            )
+            logger.warning("No AI API keys configured")
             response_text = (
-                f"Hi! I'm your {request.persona} assistant. "
-                "I'm not fully configured yet — an API key is needed for AI responses. "
-                "Please set OPENROUTER_API_KEY or GEMINI_API_KEY in your .env file."
+                f"Hi! I'm your {persona_key} assistant. "
+                "Set OPENROUTER_API_KEY or GEMINI_API_KEY in engine-room/.env for live AI."
             )
 
     return ChatResponse(response=response_text, conversationId=conversation_id)
 
 
 async def _chat_openrouter(
-    message: str,
-    system_prompt: str,
-    persona: str,
-    api_key: str,
+    message: str, system_prompt: str, persona: str, api_key: str
 ) -> str:
-    """Call OpenRouter chat completions API."""
     model = PERSONA_MODEL_MAP.get(persona, "openai/gpt-4o")
-
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             OPENROUTER_URL,
@@ -142,25 +145,19 @@ async def _chat_openrouter(
 
 
 async def _chat_gemini(message: str, system_prompt: str, api_key: str) -> str:
-    """Call Gemini API as fallback."""
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        "gemini-2.0-flash-001:generateContent"
+        "gemini-2.0-flash:generateContent"
     )
-
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{url}?key={api_key}",
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [
-                    {
-                        "parts": [{"text": f"{system_prompt}\n\nUser: {message}"}]
-                    }
+                    {"parts": [{"text": f"{system_prompt}\n\nUser: {message}"}]}
                 ],
-                "generationConfig": {
-                    "maxOutputTokens": 1024,
-                },
+                "generationConfig": {"maxOutputTokens": 1024},
             },
             timeout=60,
         )
@@ -169,5 +166,5 @@ async def _chat_gemini(message: str, system_prompt: str, api_key: str) -> str:
         try:
             return data["candidates"][0]["content"]["parts"][0]["text"]
         except (KeyError, IndexError):
-            logger.warning("Unexpected Gemini response format: %s", data)
+            logger.warning("Unexpected Gemini response: %s", data)
             return "Sorry, I couldn't generate a response at this time."
