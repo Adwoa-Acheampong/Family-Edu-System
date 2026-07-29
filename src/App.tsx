@@ -1,26 +1,66 @@
-import React, { useEffect, useState } from 'react';
-import { User } from './types';
-import { USERS } from './data';
+import React, { useEffect } from 'react';
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './lib/queryClient';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import { UIProvider, useUI } from './context/UIContext';
 import { Login } from './components/Login';
 import { Layout } from './components/Layout';
-import { Dashboard } from './components/Dashboards';
+import { Dashboard } from './components/DashboardRouter';
 import { LearningHub, MyProfile } from './components/Views';
-import { clearGoogleSession, exchangeGoogleCode, isEngineRoomConfigured } from './lib/api';
+import { AnalyticsPage } from './pages/AnalyticsPage';
+import { SystemConfigPage } from './pages/SystemConfigPage';
+import { SystemSettingsPage } from './pages/SystemSettingsPage';
+import { exchangeGoogleCode, isEngineRoomConfigured } from './lib/api';
+import { appConfig } from './config/env';
 
-const SESSION_KEY = 'fes_user_id';
+function ProtectedShell() {
+  const { user, isAuthenticated } = useAuth();
+  const { notice, clearNotice } = useUI();
+  const location = useLocation();
 
-export default function App() {
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    try {
-      const id = localStorage.getItem(SESSION_KEY);
-      if (!id) return null;
-      return USERS.find((u) => u.id === id) || null;
-    } catch {
-      return null;
-    }
-  });
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [oauthNotice, setOauthNotice] = useState('');
+  if (!isAuthenticated || !user) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  }
+
+  return (
+    <>
+      {notice && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[70] max-w-xl w-[calc(100%-2rem)] rounded-2xl border border-[var(--theme-color)]/30 bg-black/95 px-5 py-4 text-sm text-white shadow-2xl flex items-center justify-between gap-4">
+          <span>{notice}</span>
+          <button type="button" onClick={clearNotice} className="text-xs font-bold uppercase tracking-wider text-[var(--theme-color)]">
+            Close
+          </button>
+        </div>
+      )}
+      <Layout user={user}>
+        <Outlet />
+      </Layout>
+    </>
+  );
+}
+
+function LoginRoute() {
+  const { login, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const from = (location.state as { from?: string } | null)?.from || '/dashboard';
+
+  if (isAuthenticated) return <Navigate to={from} replace />;
+
+  return (
+    <Login
+      onLogin={(user) => {
+        login(user);
+        navigate('/dashboard', { replace: true });
+      }}
+    />
+  );
+}
+
+function OAuthBootstrap() {
+  const { setNotice } = useUI();
+  const navigate = useNavigate();
 
   useEffect(() => {
     document.documentElement.classList.add('dark');
@@ -34,79 +74,92 @@ export default function App() {
     const oauthError = params.get('error');
     if (!code && !oauthError) return;
 
-    const cleanUrl = `${window.location.pathname}${window.location.hash}`;
-    window.history.replaceState({}, document.title, cleanUrl);
+    window.history.replaceState({}, document.title, window.location.pathname);
 
     if (oauthError) {
-      setOauthNotice(`Google connection was not completed: ${oauthError}`);
+      setNotice(`Google connection was not completed: ${oauthError}`);
       return;
     }
 
-    const expectedState = localStorage.getItem('fes_google_oauth_state');
-    localStorage.removeItem('fes_google_oauth_state');
+    const expectedState = localStorage.getItem(appConfig.oauthStateKey);
+    localStorage.removeItem(appConfig.oauthStateKey);
     if (!returnedState || !expectedState || returnedState !== expectedState) {
-      setOauthNotice('Google connection was rejected because its security state did not match.');
+      setNotice('Google connection was rejected because its security state did not match.');
       return;
     }
 
     exchangeGoogleCode(code!)
       .then(() => {
-        setOauthNotice('Google Classroom connected. Open Learning Hub to sync.');
-        setActiveTab('learning-hub');
+        setNotice('Google Classroom connected. Open Learning Hub to sync.');
+        navigate('/learning-hub');
       })
       .catch((err) => {
-        setOauthNotice(err instanceof Error ? err.message : 'Google connection failed.');
+        setNotice(err instanceof Error ? err.message : 'Google connection failed.');
       });
-  }, []);
+  }, [navigate, setNotice]);
 
-  useEffect(() => {
-    try {
-      if (currentUser) localStorage.setItem(SESSION_KEY, currentUser.id);
-      else localStorage.removeItem(SESSION_KEY);
-    } catch {
-      /* ignore */
-    }
-  }, [currentUser]);
+  return null;
+}
 
-  const handleLogin = (user: User) => {
-    setCurrentUser(user);
-    setActiveTab('dashboard');
-  };
-
-  const handleLogout = () => {
-    clearGoogleSession();
-    setCurrentUser(null);
-    setActiveTab('dashboard');
-  };
-
-  if (!currentUser) {
-    return <Login onLogin={handleLogin} />;
-  }
-
+function NotFound() {
+  const navigate = useNavigate();
   return (
-    <>
-      {oauthNotice && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[70] max-w-xl w-[calc(100%-2rem)] rounded-2xl border border-[var(--theme-color)]/30 bg-black/95 px-5 py-4 text-sm text-white shadow-2xl flex items-center justify-between gap-4">
-          <span>{oauthNotice}</span>
-          <button
-            type="button"
-            onClick={() => setOauthNotice('')}
-            className="text-xs font-bold uppercase tracking-wider text-[var(--theme-color)]"
-          >
-            Close
-          </button>
-        </div>
-      )}
-      <Layout
-        user={currentUser}
-        onLogout={handleLogout}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
+    <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-8">
+      <h1 className="text-4xl font-black text-white mb-2">404</h1>
+      <p className="text-gray-500 mb-6">This route does not exist.</p>
+      <button
+        type="button"
+        onClick={() => navigate('/dashboard')}
+        className="text-[var(--theme-color)] font-bold text-sm uppercase tracking-wider"
       >
-        {activeTab === 'dashboard' && <Dashboard user={currentUser} />}
-        {activeTab === 'learning-hub' && <LearningHub user={currentUser} />}
-        {activeTab === 'profile' && <MyProfile user={currentUser} />}
-      </Layout>
-    </>
+        Go to dashboard
+      </button>
+    </div>
+  );
+}
+
+function DashboardGate() {
+  const { user } = useAuth();
+  return <Dashboard user={user!} />;
+}
+function LearningHubGate() {
+  const { user } = useAuth();
+  return <LearningHub user={user!} />;
+}
+function ProfileGate() {
+  const { user } = useAuth();
+  return <MyProfile user={user!} />;
+}
+
+function AdminOnly({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (user?.role !== 'admin') return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
+}
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <UIProvider>
+          <BrowserRouter>
+            <OAuthBootstrap />
+            <Routes>
+              <Route path="/login" element={<LoginRoute />} />
+              <Route element={<ProtectedShell />}>
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/dashboard" element={<DashboardGate />} />
+                <Route path="/learning-hub" element={<LearningHubGate />} />
+                <Route path="/profile" element={<ProfileGate />} />
+                <Route path="/analytics" element={<AnalyticsPage />} />
+                <Route path="/system/config" element={<AdminOnly><SystemConfigPage /></AdminOnly>} />
+                <Route path="/system/settings" element={<AdminOnly><SystemSettingsPage /></AdminOnly>} />
+              </Route>
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </BrowserRouter>
+        </UIProvider>
+      </AuthProvider>
+    </QueryClientProvider>
   );
 }
