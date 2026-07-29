@@ -7,7 +7,7 @@ import {
   Menu,
   Search,
   Bell,
-  LayoutDashboard,
+  Grid,
   BookOpen,
   UserCircle,
   MessageSquare,
@@ -60,7 +60,7 @@ export function Layout({ user, onLogout, activeTab, onTabChange, children }: Lay
   }, [user.id]);
 
   const nav = [
-    { name: 'Dashboard', icon: LayoutDashboard, id: 'dashboard' },
+    { name: 'Dashboard', icon: Grid, id: 'dashboard' },
     { name: 'Learning Hub', icon: BookOpen, id: 'learning-hub' },
     { name: 'My Profile', icon: UserCircle, id: 'profile' },
   ];
