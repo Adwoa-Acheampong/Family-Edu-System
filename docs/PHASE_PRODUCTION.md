@@ -5,22 +5,21 @@
 | Phase | Item | Status |
 |-------|------|--------|
 | 1–5 | Config, Query, Router, system APIs, persistence, Learning Hub | Done |
-| 6 | Kobby Analyst ← assignments API | Done |
-| 7 | Badu Master ← assignments API + `useAssignments` hook | Done |
-| 8 | Plug secrets & run | **You** |
+| 6 | Kobby ← assignments API | Done |
+| 7 | Badu ← assignments API | Done |
+| 8 | Young learners ← API quest strip + games | Done |
+| 9 | Plug secrets & run | **You** |
 
-## Live dashboards
+## All personas
 
 | User | Dashboard |
 |------|-----------|
-| Aba | Architect — system status / analytics / drive |
-| Kobby | Analyst — API quests, submit, smart goals |
-| Badu | Master — API lessons, continue + checklist |
-| Pappy, Seth, Kweku, Shee | Age-play UIs (local games); Learning Hub still API |
+| Aba | Live system / analytics / drive |
+| Kobby | API quests + submit + smart goals |
+| Badu | API lessons + checklist |
+| Pappy, Seth, Kweku, Shee | Play/story UI **+** live quest strip from API |
 
-## Shared hook
-
-`src/hooks/useAssignments.ts` — load + submit for any persona.
+Learning Hub is API-first for everyone.
 
 ## Run
 
@@ -31,7 +30,8 @@ npm run dev
 ```
 
 ```bat
-curl http://localhost:3000/api/assignments/badu
+curl http://localhost:3000/api/assignments/seth
+curl http://localhost:3000/api/assignments/pappy
 ```
 
-Login as **Badu** → current lesson from API → Continue → Turn In.
+Login as **Seth** or **Pappy** — strip under the header shows API quests; games still work below.

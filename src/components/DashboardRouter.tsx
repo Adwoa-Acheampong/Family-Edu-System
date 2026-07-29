@@ -3,14 +3,14 @@ import { User } from '../types';
 import { ArchitectDashboard } from './ArchitectDashboard';
 import { AnalystDashboard } from './AnalystDashboard';
 import { MasterDashboard } from './MasterDashboard';
-import { Dashboard as PersonaDashboards } from './Dashboards';
+import { YoungLearnerShell } from './YoungLearnerShell';
 
 /**
- * Live API dashboards:
+ * Live API coverage:
  * - aba → system telemetry
- * - kobby → gamified quests from assignments API
- * - badu → instructional lessons from assignments API
- * Others keep interactive age-appropriate UIs (games / stories).
+ * - kobby → gamified API quests
+ * - badu → instructional API lessons
+ * - pappy, seth, kweku, shee → play UI + API quest strip
  */
 export function Dashboard({ user }: { user: User }) {
   switch (user.id) {
@@ -20,7 +20,12 @@ export function Dashboard({ user }: { user: User }) {
       return <AnalystDashboard user={user} />;
     case 'badu':
       return <MasterDashboard user={user} />;
+    case 'pappy':
+    case 'seth':
+    case 'kweku':
+    case 'shee':
+      return <YoungLearnerShell user={user} />;
     default:
-      return <PersonaDashboards user={user} />;
+      return <YoungLearnerShell user={user} />;
   }
 }
