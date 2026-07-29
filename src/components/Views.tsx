@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { User } from '../types';
-import { getMockAssignments, getMockCourses } from '../data';
+import { getMockCourses } from '../data';
 import { ClassroomCard, Assignment } from './ClassroomCard';
 import { SubmissionWidget } from './SubmissionWidget';
 import { LessonBuilder } from './LessonBuilder';
 import {
+  getAssignments,
   hasGoogleSession,
   isEngineRoomConfigured,
   startGoogleOAuth,
@@ -21,25 +22,69 @@ interface Course {
   progress: number;
 }
 
+function coursesFromAssignments(assignments: Assignment[], fallbackUserId: string): Course[] {
+  const byCourse = new Map<string, Assignment[]>();
+  for (const a of assignments) {
+    const key = a.courseId || a.courseName || 'default';
+    if (!byCourse.has(key)) byCourse.set(key, []);
+    byCourse.get(key)!.push(a);
+  }
+  if (byCourse.size === 0) return getMockCourses(fallbackUserId);
+  return Array.from(byCourse.entries()).map(([id, items]) => {
+    const done = items.filter((x) => x.status !== 'PENDING').length;
+    return {
+      id,
+      title: items[0]?.courseName || id.replace(/^course_/, '').replace(/_/g, ' '),
+      emoji: '📚',
+      progress: items.length ? Math.round((done / items.length) * 100) : 0,
+    };
+  });
+}
+
 export function LearningHub({ user }: { user: User }) {
-  const [courses, setCourses] = useState<Course[]>(() => getMockCourses(user.id));
-  const [assignments, setAssignments] = useState<Assignment[]>(() => getMockAssignments(user.id));
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'DONE'>('ALL');
   const [submitOpen, setSubmitOpen] = useState(false);
   const [activeAssignment, setActiveAssignment] = useState<Assignment | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [syncError, setSyncError] = useState('');
-  const [liveClassroom, setLiveClassroom] = useState(false);
+  const [dataSource, setDataSource] = useState<'api' | 'google' | 'empty'>('empty');
 
-  useEffect(() => {
-    setCourses(getMockCourses(user.id));
-    setAssignments(getMockAssignments(user.id));
-    setFilter('ALL');
-    setLiveClassroom(false);
+  const loadFromApi = useCallback(async () => {
+    setLoading(true);
+    setSyncError('');
+    try {
+      const data = await getAssignments(user.id);
+      const list: Assignment[] = (data.assignments || []).map((a: any) => ({
+        id: a.id,
+        courseId: a.courseId,
+        courseName: a.courseName,
+        title: a.title,
+        description: a.description,
+        dueDate: a.dueDate,
+        points: a.points,
+        status: a.status || 'PENDING',
+      }));
+      setAssignments(list);
+      setCourses(coursesFromAssignments(list, user.id));
+      setDataSource(list.length ? 'api' : 'empty');
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Could not load assignments');
+      setAssignments([]);
+      setCourses([]);
+      setDataSource('empty');
+    } finally {
+      setLoading(false);
+    }
   }, [user.id]);
 
   const syncLiveClassroom = useCallback(async () => {
-    if (!isEngineRoomConfigured || !hasGoogleSession()) return;
+    if (!isEngineRoomConfigured || !hasGoogleSession()) {
+      await loadFromApi();
+      return;
+    }
     setSyncing(true);
     setSyncError('');
     try {
@@ -53,35 +98,45 @@ export function LearningHub({ user }: { user: User }) {
         dueDate: assignment.dueDate,
         alternateLink: assignment.alternateLink,
         materials: assignment.materials,
-        points: assignment.maxPoints,
+        points: assignment.maxPoints ?? assignment.points,
         status:
           assignment.submissionState === 'RETURNED'
             ? 'GRADED'
-            : assignment.submissionState === 'TURNED_IN'
+            : assignment.submissionState === 'TURNED_IN' || assignment.status === 'SUBMITTED'
               ? 'SUBMITTED'
-              : 'PENDING',
+              : assignment.status === 'GRADED'
+                ? 'GRADED'
+                : 'PENDING',
       }));
-      const liveCourses: Course[] = (data.courses || []).map((course: any) => {
-        const courseAssignments = liveAssignments.filter((item) => item.courseId === course.id);
-        const completed = courseAssignments.filter((item) => item.status !== 'PENDING').length;
-        return {
-          id: course.id,
-          title: course.name,
-          emoji: '📚',
-          progress: courseAssignments.length ? Math.round((completed / courseAssignments.length) * 100) : 0,
-        };
-      });
-      setAssignments(liveAssignments);
-      setCourses(liveCourses);
-      setLiveClassroom(true);
+      if (liveAssignments.length) {
+        setAssignments(liveAssignments);
+        const liveCourses: Course[] = (data.courses || []).map((course: any) => {
+          const courseAssignments = liveAssignments.filter((item) => item.courseId === course.id);
+          const completed = courseAssignments.filter((item) => item.status !== 'PENDING').length;
+          return {
+            id: course.id,
+            title: course.name,
+            emoji: '📚',
+            progress: courseAssignments.length
+              ? Math.round((completed / courseAssignments.length) * 100)
+              : 0,
+          };
+        });
+        setCourses(liveCourses.length ? liveCourses : coursesFromAssignments(liveAssignments, user.id));
+        setDataSource('google');
+      } else {
+        await loadFromApi();
+      }
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : 'Classroom sync failed.');
+      await loadFromApi();
     } finally {
       setSyncing(false);
     }
-  }, [user.id]);
+  }, [user.id, loadFromApi]);
 
   useEffect(() => {
+    setFilter('ALL');
     void syncLiveClassroom();
   }, [syncLiveClassroom]);
 
@@ -107,9 +162,6 @@ export function LearningHub({ user }: { user: User }) {
   ) => {
     const assignment = assignments.find((item) => item.id === id);
     if (!assignment) throw new Error('Assignment not found.');
-    if (isEngineRoomConfigured && !assignment.courseId) {
-      throw new Error('This demo assignment cannot be submitted to Google Classroom.');
-    }
     await submitAssignment(assignment.courseId || 'course_family', id, {
       ...data,
       userId: user.id,
@@ -132,12 +184,13 @@ export function LearningHub({ user }: { user: User }) {
           <p className="text-gray-500 mt-2 text-sm md:text-base max-w-xl">
             {isYoung
               ? 'Pick a quest below. You can ask the Engine Room for help anytime.'
-              : 'Courses, assignments, and materials tailored to your focus.'}
+              : 'Courses and assignments from the API / Google Classroom.'}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {isEngineRoomConfigured && !hasGoogleSession() ? (
             <button
+              type="button"
               onClick={async () => {
                 setSyncError('');
                 try {
@@ -151,16 +204,16 @@ export function LearningHub({ user }: { user: User }) {
             >
               Connect Google
             </button>
-          ) : isEngineRoomConfigured ? (
-            <button
-              onClick={() => void syncLiveClassroom()}
-              disabled={syncing}
-              className="px-3 py-1.5 rounded-full text-xs font-bold border border-black/10 dark:border-white/10 text-gray-500 inline-flex items-center gap-1.5 disabled:opacity-50"
-            >
-              {syncing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-              {syncing ? 'Syncing' : 'Sync Classroom'}
-            </button>
           ) : null}
+          <button
+            type="button"
+            onClick={() => void syncLiveClassroom()}
+            disabled={syncing || loading}
+            className="px-3 py-1.5 rounded-full text-xs font-bold border border-black/10 dark:border-white/10 text-gray-500 inline-flex items-center gap-1.5 disabled:opacity-50"
+          >
+            {syncing || loading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+            {syncing || loading ? 'Loading' : 'Refresh'}
+          </button>
           <span className="px-3 py-1.5 rounded-full text-xs font-bold border border-[var(--theme-color)]/30 bg-[var(--theme-color)]/10 text-[var(--theme-color)]">
             {pendingCount} pending
           </span>
@@ -171,95 +224,115 @@ export function LearningHub({ user }: { user: User }) {
       </div>
 
       <div className="mb-6 flex flex-wrap items-center gap-2 text-xs">
-        <span className={cn(
-          'rounded-full px-3 py-1.5 font-bold',
-          liveClassroom
-            ? 'bg-green-500/10 text-green-600 dark:text-green-400'
-            : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-        )}>
-          {liveClassroom ? 'Live Google Classroom data' : 'Demo learning data'}
+        <span
+          className={cn(
+            'rounded-full px-3 py-1.5 font-bold',
+            dataSource === 'google'
+              ? 'bg-green-500/10 text-green-600 dark:text-green-400'
+              : dataSource === 'api'
+                ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+          )}
+        >
+          {dataSource === 'google'
+            ? 'Live Google Classroom'
+            : dataSource === 'api'
+              ? 'API assignment store'
+              : 'No assignments yet'}
         </span>
-        {syncError && <span role="alert" className="text-red-600 dark:text-red-400">{syncError}</span>}
+        {syncError && (
+          <span role="alert" className="text-red-600 dark:text-red-400">
+            {syncError}
+          </span>
+        )}
       </div>
 
-      {/* Courses */}
-      <section className="mb-10">
-        <div className="flex items-center gap-2 mb-4">
-          <GraduationCap size={18} className="text-[var(--theme-color)]" />
-          <h2 className="text-sm font-bold uppercase tracking-widest text-gray-500">Courses</h2>
+      {loading ? (
+        <div className="flex items-center justify-center py-20 text-gray-500 gap-2">
+          <Loader2 className="animate-spin" /> Loading assignments…
         </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {courses.map((c) => (
-            <div
-              key={c.id}
-              className="group relative overflow-hidden rounded-2xl border border-black/10 dark:border-white/10 bg-white dark:bg-[#0a0a0a] p-5 hover:border-[var(--theme-color)]/40 transition-all hover:-translate-y-0.5 shadow-sm"
-            >
-              <div className="text-3xl mb-3">{c.emoji}</div>
-              <h3 className="font-bold text-gray-900 dark:text-white mb-3">{c.title}</h3>
-              <div className="w-full h-1.5 rounded-full bg-gray-100 dark:bg-black overflow-hidden border border-black/5 dark:border-white/5">
-                <div
-                  className="h-full rounded-full bg-[var(--theme-color)] transition-all duration-700"
-                  style={{ width: `${c.progress}%` }}
-                />
+      ) : (
+        <>
+          <section className="mb-10">
+            <div className="flex items-center gap-2 mb-4">
+              <GraduationCap size={18} className="text-[var(--theme-color)]" />
+              <h2 className="text-sm font-bold uppercase tracking-widest text-gray-500">Courses</h2>
+            </div>
+            {courses.length === 0 ? (
+              <p className="text-sm text-gray-500">No courses for this profile yet.</p>
+            ) : (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {courses.map((c) => (
+                  <div
+                    key={c.id}
+                    className="group relative overflow-hidden rounded-2xl border border-black/10 dark:border-white/10 bg-white dark:bg-[#0a0a0a] p-5 hover:border-[var(--theme-color)]/40 transition-all hover:-translate-y-0.5 shadow-sm"
+                  >
+                    <div className="text-3xl mb-3">{c.emoji}</div>
+                    <h3 className="font-bold text-gray-900 dark:text-white mb-3 capitalize">{c.title}</h3>
+                    <div className="w-full h-1.5 rounded-full bg-gray-100 dark:bg-black overflow-hidden border border-black/5 dark:border-white/5">
+                      <div
+                        className="h-full rounded-full bg-[var(--theme-color)] transition-all duration-700"
+                        style={{ width: `${c.progress}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between mt-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                      <span>Progress</span>
+                      <span className="text-[var(--theme-color)]">{c.progress}%</span>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="flex justify-between mt-2 text-[10px] font-bold uppercase tracking-wider text-gray-500">
-                <span>Progress</span>
-                <span className="text-[var(--theme-color)]">{c.progress}%</span>
+            )}
+          </section>
+
+          <section>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div className="flex items-center gap-2">
+                <BookOpen size={18} className="text-[var(--theme-color)]" />
+                <h2 className="text-sm font-bold uppercase tracking-widest text-gray-500">Assignments</h2>
+              </div>
+              <div className="flex gap-1 p-1 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5">
+                {(['ALL', 'PENDING', 'DONE'] as const).map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setFilter(f)}
+                    className={cn(
+                      'px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors',
+                      filter === f
+                        ? 'bg-[var(--theme-color)] text-black'
+                        : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                    )}
+                  >
+                    {f === 'DONE' ? 'Submitted' : f}
+                  </button>
+                ))}
               </div>
             </div>
-          ))}
-        </div>
-      </section>
 
-      {/* Assignments */}
-      <section>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-          <div className="flex items-center gap-2">
-            <BookOpen size={18} className="text-[var(--theme-color)]" />
-            <h2 className="text-sm font-bold uppercase tracking-widest text-gray-500">Assignments</h2>
-          </div>
-          <div className="flex gap-1 p-1 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 dark:border-white/5">
-            {(['ALL', 'PENDING', 'DONE'] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={cn(
-                  'px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors',
-                  filter === f
-                    ? 'bg-[var(--theme-color)] text-black'
-                    : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
-                )}
-              >
-                {f === 'DONE' ? 'Submitted' : f}
-              </button>
-            ))}
-          </div>
-        </div>
+            {filtered.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-black/10 dark:border-white/10 p-12 text-center">
+                <Trophy className="mx-auto mb-3 text-[var(--theme-color)]" size={32} />
+                <p className="font-bold text-gray-900 dark:text-white">All caught up!</p>
+                <p className="text-sm text-gray-500 mt-1">No assignments in this view.</p>
+              </div>
+            ) : (
+              <div className="grid md:grid-cols-2 gap-4">
+                {filtered.map((a) => (
+                  <ClassroomCard
+                    key={a.id}
+                    assignment={a}
+                    onView={handleView}
+                    onHelp={() => window.dispatchEvent(new CustomEvent('fes-open-ai'))}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
 
-        {filtered.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-black/10 dark:border-white/10 p-12 text-center">
-            <Trophy className="mx-auto mb-3 text-[var(--theme-color)]" size={32} />
-            <p className="font-bold text-gray-900 dark:text-white">All caught up!</p>
-            <p className="text-sm text-gray-500 mt-1">No assignments in this view.</p>
-          </div>
-        ) : (
-          <div className="grid md:grid-cols-2 gap-4">
-            {filtered.map((a) => (
-              <ClassroomCard
-                key={a.id}
-                assignment={a}
-                onView={handleView}
-                onHelp={() => {
-                  /* Layout AI is global; hint via focus */
-                  window.dispatchEvent(new CustomEvent('fes-open-ai'));
-                }}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      <LessonBuilder user={user} />
+          <LessonBuilder user={user} />
+        </>
+      )}
 
       <SubmissionWidget
         isOpen={submitOpen}
@@ -289,7 +362,10 @@ export function MyProfile({ user }: { user: User }) {
       </h1>
 
       <div className="bg-white dark:bg-[#0a0a0a] border border-black/10 dark:border-white/10 rounded-3xl overflow-hidden shadow-xl">
-        <div className="h-28 relative" style={{ background: `linear-gradient(135deg, ${user.themeHex}55, transparent)` }}>
+        <div
+          className="h-28 relative"
+          style={{ background: `linear-gradient(135deg, ${user.themeHex}55, transparent)` }}
+        >
           <div className="absolute inset-0 bg-gradient-to-t from-white dark:from-[#0a0a0a] to-transparent" />
         </div>
 
@@ -320,7 +396,10 @@ export function MyProfile({ user }: { user: User }) {
               title="Theme color"
               body={
                 <span className="inline-flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full border border-black/10" style={{ backgroundColor: user.themeHex }} />
+                  <span
+                    className="w-3 h-3 rounded-full border border-black/10"
+                    style={{ backgroundColor: user.themeHex }}
+                  />
                   {user.themeHex}
                 </span>
               }
