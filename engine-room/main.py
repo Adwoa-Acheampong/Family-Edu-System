@@ -55,11 +55,15 @@ logger = logging.getLogger("engine_room")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Engine Room starting up...")
-    # Soft-init: allow health without TOKEN_ENCRYPTION_KEY during first boot docs
     try:
         await init_db()
     except Exception as e:
         logger.warning("DB init deferred/failed: %s", e)
+    gemini = bool(os.environ.get("GEMINI_API_KEY", "").strip())
+    logger.info(
+        "OCR backend: Gemini Vision (%s)",
+        "ready" if gemini else "GEMINI_API_KEY not set — OCR will 503 until configured",
+    )
     logger.info("Engine Room ready")
     yield
     logger.info("Engine Room shutting down...")
@@ -68,7 +72,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Family Edu Engine Room",
     description="Local AI orchestrator for the Family Educational ERP",
-    version="1.1.0",
+    version="1.2.0",
     lifespan=lifespan,
 )
 
@@ -89,7 +93,6 @@ async def require_access_token(
     authorization: Optional[str] = None,
     x_google_user_id: Optional[str] = None,
 ) -> str:
-    """Extract Bearer token and optionally auto-refresh via stored user tokens."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=401, detail="Missing or invalid Authorization header"
@@ -106,6 +109,19 @@ async def require_access_token(
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     return HealthResponse(status="ok")
+
+
+@app.get("/health/detail")
+async def health_detail():
+    return {
+        "status": "ok",
+        "gemini": bool(os.environ.get("GEMINI_API_KEY", "").strip()),
+        "openrouter": bool(os.environ.get("OPENROUTER_API_KEY", "").strip()),
+        "ocr": "gemini-vision",
+        "google_oauth": bool(
+            os.environ.get("GOOGLE_CLIENT_ID") and os.environ.get("GOOGLE_CLIENT_SECRET")
+        ),
+    }
 
 
 @app.post("/v1/auth/exchange-code", response_model=AuthExchangeResponse)
@@ -299,6 +315,7 @@ async def process_document(
     authorization: Optional[str] = Header(None),
     x_google_user_id: Optional[str] = Header(None, alias="X-Google-User-Id"),
 ):
+    """OCR a Drive file via Gemini Vision (PDF / PNG / JPEG / WebP)."""
     token = await require_access_token(authorization, x_google_user_id)
     from auth.google_auth import build_google_client
     from services.ocr import process_document as ocr_process
@@ -306,8 +323,45 @@ async def process_document(
     try:
         drive = build_google_client("drive", "v3", token)
         return await ocr_process(drive, request.driveFileId, request.fileType)
+    except RuntimeError as e:
+        msg = str(e)
+        if "GEMINI_API_KEY" in msg:
+            raise HTTPException(status_code=503, detail=msg)
+        logger.error("OCR processing failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"OCR failed: {e}")
     except Exception as e:
         logger.error("OCR processing failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"OCR failed: {e}")
+
+
+@app.post("/v1/process-document/upload", response_model=OCRResponse)
+async def process_document_upload(
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(None),
+):
+    """OCR an uploaded image or PDF via Gemini Vision (no Drive required)."""
+    # Auth optional for local testing; require header when present and empty-invalid
+    if authorization is not None and not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid Authorization header")
+
+    from services.ocr import process_bytes
+
+    content = await file.read()
+    name = file.filename or "upload.bin"
+    ext = name.rsplit(".", 1)[-1] if "." in name else "png"
+    mime = file.content_type or None
+
+    try:
+        return await process_bytes(content, file_type=ext, mime_type=mime)
+    except RuntimeError as e:
+        msg = str(e)
+        if "GEMINI_API_KEY" in msg:
+            raise HTTPException(status_code=503, detail=msg)
+        raise HTTPException(status_code=502, detail=f"OCR failed: {e}")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error("Upload OCR failed: %s", e)
         raise HTTPException(status_code=502, detail=f"OCR failed: {e}")
 
 
@@ -339,7 +393,6 @@ async def ingest_lesson(
     authorization: Optional[str] = Header(None),
     x_google_user_id: Optional[str] = Header(None, alias="X-Google-User-Id"),
 ):
-    """Turn a YouTube video into a persisted lesson and optional notebook source."""
     from db.sqlite import save_lesson
     from services.notebook import (
         add_youtube_source,
@@ -434,7 +487,6 @@ async def get_lessons(
 async def progress_analytics(
     authorization: Optional[str] = Header(None),
 ):
-    # Auth optional for stub; keep Header so clients can send it later
     return ProgressAnalytics(
         completionPercent=0.0,
         currentStreak=0,
