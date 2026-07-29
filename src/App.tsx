@@ -6,7 +6,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { UIProvider, useUI } from './context/UIContext';
 import { Login } from './components/Login';
 import { Layout } from './components/Layout';
-import { Dashboard } from './components/Dashboards';
+import { Dashboard } from './components/DashboardRouter';
 import { LearningHub, MyProfile } from './components/Views';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SystemConfigPage } from './pages/SystemConfigPage';
@@ -102,15 +102,39 @@ function OAuthBootstrap() {
 }
 
 function NotFound() {
+  const navigate = useNavigate();
   return (
     <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-8">
       <h1 className="text-4xl font-black text-white mb-2">404</h1>
       <p className="text-gray-500 mb-6">This route does not exist.</p>
-      <a href="/dashboard" className="text-[var(--theme-color)] font-bold text-sm uppercase tracking-wider">
+      <button
+        type="button"
+        onClick={() => navigate('/dashboard')}
+        className="text-[var(--theme-color)] font-bold text-sm uppercase tracking-wider"
+      >
         Go to dashboard
-      </a>
+      </button>
     </div>
   );
+}
+
+function DashboardGate() {
+  const { user } = useAuth();
+  return <Dashboard user={user!} />;
+}
+function LearningHubGate() {
+  const { user } = useAuth();
+  return <LearningHub user={user!} />;
+}
+function ProfileGate() {
+  const { user } = useAuth();
+  return <MyProfile user={user!} />;
+}
+
+function AdminOnly({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
+  if (user?.role !== 'admin') return <Navigate to="/dashboard" replace />;
+  return <>{children}</>;
 }
 
 export default function App() {
@@ -138,23 +162,4 @@ export default function App() {
       </AuthProvider>
     </QueryClientProvider>
   );
-}
-
-function DashboardGate() {
-  const { user } = useAuth();
-  return <Dashboard user={user!} />;
-}
-function LearningHubGate() {
-  const { user } = useAuth();
-  return <LearningHub user={user!} />;
-}
-function ProfileGate() {
-  const { user } = useAuth();
-  return <MyProfile user={user!} />;
-}
-
-function AdminOnly({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
-  if (user?.role !== 'admin') return <Navigate to="/dashboard" replace />;
-  return <>{children}</>;
 }
