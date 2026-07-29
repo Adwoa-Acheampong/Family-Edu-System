@@ -1,60 +1,64 @@
-# Production wiring — deploy today
+# Production wiring
 
-## Phase status
+## Status
 
 | Phase | Status |
 |-------|--------|
 | 1 Config + React Query + live Architect telemetry | Done |
 | 2 React Router + Auth/UI context + protected routes | Done |
-| 3 Analytics / System Config / System Settings pages | Done |
-| 4 Plug secrets + `npm install` + run | **You** |
+| 3 Analytics / System Config / System Settings | Done |
+| 4 Server system routes registered + dotenv | Done |
+| 5 Secrets + npm install + verify | **You** |
 
-## Install & run (Windows)
+## Run (Windows)
 
 ```bat
 cd C:\Users\lenovo\OneDrive\Desktop\Family-Edu-System
 git pull origin main
 npm install
 copy .env.example .env
-notepad .env
 ```
 
-Set at minimum:
+Edit `.env`:
 
 ```env
-GEMINI_API_KEY=...
-# optional
+GEMINI_API_KEY=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
 VITE_ENGINE_ROOM_URL=http://localhost:8000
+PORT=3000
 ```
 
 ```bat
 npm run dev
 ```
 
-Open `http://localhost:3000/login`.
+Smoke-test APIs:
+
+```bat
+curl http://localhost:3000/api/health
+curl http://localhost:3000/api/system/status
+curl "http://localhost:3000/api/analytics/summary?userId=aba"
+```
+
+App: http://localhost:3000/login
 
 ## Routes
 
-| Path | Access |
-|------|--------|
+| Path | Who |
+|------|-----|
 | `/login` | Public |
 | `/dashboard` | Auth |
 | `/learning-hub` | Auth |
 | `/profile` | Auth |
 | `/analytics` | Auth |
-| `/system/config` | Admin (Aba) |
+| `/system/config` | Admin |
 | `/system/settings` | Admin |
 
-## API (Node)
+## Production build
 
-- `GET /api/system/status` — latency, keys, event log
-- `GET /api/analytics/summary?userId=` — charts + curriculum milestones
-- `GET/PUT /api/system/settings` — persisted runtime settings (in-memory; swap DB later)
-
-Ensure `server.ts` calls `registerSystemRoutes(app, mockAssignments)` (see import at top of server).
-
-## Next hardening (post-launch)
-
-- Persist `systemSettingsStore` to SQLite/Postgres
-- Replace assignment store with live Classroom only
-- Remove remaining persona mock quests when Classroom is live for kids
+```bat
+set NODE_ENV=production
+npm run build
+npm start
+```

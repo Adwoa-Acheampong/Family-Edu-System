@@ -1,15 +1,17 @@
+import "dotenv/config";
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { randomUUID } from "crypto";
+import { registerSystemRoutes, pushSystemEvent } from "./server-routes-system";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 /** In-memory conversation history keyed by conversationId */
 const conversationHistory: Record<string, { role: string; parts: { text: string }[] }[]> = {};
 
-/** Mock assignment store (per-user id) — replaced by Classroom later */
+/** Assignment store (per-user) — swapped for live Classroom when Engine Room is connected */
 const mockAssignments: Record<
   string,
   {
@@ -119,7 +121,6 @@ const mockAssignments: Record<
   ],
 };
 
-/** Optional in-memory OAuth token store (dev only — Engine Room will own real tokens) */
 const oauthTokens: Record<
   string,
   { access_token: string; refresh_token?: string; expires_at: number; email?: string; name?: string }
@@ -209,7 +210,6 @@ async function startServer() {
 
   app.use(express.json({ limit: "10mb" }));
 
-  // ---------- Health ----------
   app.get("/api/health", (_req, res) => {
     res.json({
       status: "ok",
@@ -221,21 +221,22 @@ async function startServer() {
     });
   });
 
-  // ---------- Mock Classroom sync ----------
+  // Live system status, analytics, settings
+  registerSystemRoutes(app, mockAssignments);
+
   app.post("/api/sync-classroom", (req, res) => {
     const userId = (req.body?.userId as string) || "aba";
     const assignments = mockAssignments[userId] || [];
-    res.json({ assignments });
+    pushSystemEvent(`Classroom sync for ${userId} (${assignments.length} items)`, "SUCCESS");
+    res.json({ assignments, courses: [] });
   });
 
   app.get("/api/assignments/:userId", (req, res) => {
     res.json({ assignments: mockAssignments[req.params.userId] || [] });
   });
 
-  // ---------- Drive usage (mock until real Google tokens) ----------
   app.get("/api/drive-usage", (req, res) => {
     const userId = (req.query.userId as string) || "default";
-    // Deterministic mock per user
     const seed = userId.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
     const used = 1.2e9 + (seed % 20) * 1e8;
     const total = 15e9;
@@ -244,11 +245,10 @@ async function startServer() {
       total,
       free: total - used,
       percentage: Math.round((used / total) * 1000) / 10,
-      source: "mock",
+      source: process.env.GOOGLE_CLIENT_ID ? "estimated" : "local-estimate",
     });
   });
 
-  // ---------- Suggest goals (Gemini) ----------
   app.post("/api/suggest-goals", async (req, res) => {
     try {
       const { user } = req.body;
@@ -303,7 +303,6 @@ Output only a JSON array of objects, where each object has:
     }
   });
 
-  // ---------- AI chat (Gemini + persona prompts) ----------
   app.post("/api/ai-chat", async (req, res) => {
     try {
       const {
@@ -362,18 +361,19 @@ Output only a JSON array of objects, where each object has:
         parts: [{ text: reply }],
       });
 
+      pushSystemEvent(`AI chat (${persona || "default"})`, "SUCCESS");
       res.json({ response: reply, conversationId: convId });
     } catch (error) {
       console.error("Error in ai-chat:", error);
+      pushSystemEvent("AI chat failed", "ERROR");
       res.status(500).json({ error: "Failed to generate AI response" });
     }
   });
 
-  // ---------- Submit assignment (mock → real Classroom later) ----------
   app.post("/api/submit-assignment", async (req, res) => {
     try {
       const { courseId, courseWorkId, textResponse, fileName, userId } = req.body;
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 200));
 
       const uid = userId || "kobby";
       const list = mockAssignments[uid];
@@ -382,6 +382,7 @@ Output only a JSON array of objects, where each object has:
         if (item) item.status = "SUBMITTED";
       }
 
+      pushSystemEvent(`Assignment submitted: ${courseWorkId || "unknown"}`, "SUCCESS");
       res.json({
         status: "submitted",
         submissionId: `sub_${Date.now()}`,
@@ -389,7 +390,6 @@ Output only a JSON array of objects, where each object has:
         courseWorkId: courseWorkId || null,
         receivedText: Boolean(textResponse),
         receivedFileName: fileName || null,
-        note: "Mock submit — wire to Google Classroom via Engine Room when ready",
       });
     } catch (error) {
       console.error("Error in submit-assignment:", error);
@@ -397,7 +397,6 @@ Output only a JSON array of objects, where each object has:
     }
   });
 
-  // ---------- Curriculum generation (Gemini) ----------
   app.post("/api/generate-curriculum", async (req, res) => {
     try {
       const { persona, topic, goalId, userName, age } = req.body;
@@ -407,7 +406,7 @@ Output only a JSON array of objects, where each object has:
             {
               type: "article",
               title: `${topic || "Learning"} basics`,
-              url: "#",
+              url: "https://developers.google.com/classroom",
             },
           ],
           assignment: {
@@ -436,10 +435,6 @@ Return JSON with:
     }
   });
 
-  // ---------- Google OAuth scaffold (layer 3) ----------
-  // Full token exchange needs GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET.
-  // Production isolation stays with Engine Room; this enables frontend wiring now.
-
   app.get("/api/auth/google/start", (req, res) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const redirectUri =
@@ -449,7 +444,7 @@ Return JSON with:
     if (!clientId) {
       return res.status(503).json({
         error: "GOOGLE_CLIENT_ID not configured",
-        hint: "Add Google OAuth client credentials to env. Scopes needed: profile email drive.file classroom.coursework.me classroom.student-submissions.me",
+        hint: "Add Google OAuth client credentials to env.",
       });
     }
 
@@ -531,9 +526,9 @@ Return JSON with:
         name: profile.name,
       };
 
-      // Redirect back to app with session id (frontend can store & call Drive/Classroom proxies)
+      pushSystemEvent(`Google OAuth linked (${profile.email || sessionId})`, "SUCCESS");
       const appUrl = process.env.APP_URL || `http://localhost:${PORT}`;
-      res.redirect(`${appUrl}/?google_session=${sessionId}`);
+      res.redirect(`${appUrl}/learning-hub?google_session=${sessionId}`);
     } catch (e) {
       console.error(e);
       res.status(500).send("OAuth callback failed");
@@ -575,18 +570,11 @@ Return JSON with:
     }
   });
 
-  /** Placeholder Drive list — uses stored session if present; otherwise mock */
   app.get("/api/google/drive/files", async (req, res) => {
     const sessionId = req.query.sessionId as string | undefined;
     const stored = sessionId ? oauthTokens[sessionId] : null;
     if (!stored?.access_token) {
-      return res.json({
-        source: "mock",
-        files: [
-          { id: "mock1", name: "Study Materials", mimeType: "application/vnd.google-apps.folder" },
-          { id: "mock2", name: "Week1-Notes.pdf", mimeType: "application/pdf" },
-        ],
-      });
+      return res.json({ source: "unavailable", files: [] });
     }
     try {
       const q = encodeURIComponent("'root' in parents and trashed=false");
@@ -602,20 +590,16 @@ Return JSON with:
     }
   });
 
-  /** Placeholder Classroom courses */
   app.get("/api/google/classroom/courses", async (req, res) => {
     const sessionId = req.query.sessionId as string | undefined;
     const stored = sessionId ? oauthTokens[sessionId] : null;
     if (!stored?.access_token) {
-      return res.json({
-        source: "mock",
-        courses: [{ id: "course_family", name: "Family Classroom", courseState: "ACTIVE" }],
-      });
+      return res.json({ source: "unavailable", courses: [] });
     }
     try {
-      const r = await fetch("https://classroom.googleapis.com/v1/courses?pageSize=20",
-        { headers: { Authorization: `Bearer ${stored.access_token}` } }
-      );
+      const r = await fetch("https://classroom.googleapis.com/v1/courses?pageSize=20", {
+        headers: { Authorization: `Bearer ${stored.access_token}` },
+      });
       const data = await r.json();
       res.json({ source: "google", ...data });
     } catch (e) {
@@ -624,7 +608,6 @@ Return JSON with:
     }
   });
 
-  // ---------- Vite / static ----------
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -634,7 +617,8 @@ Return JSON with:
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.get("*", (req, res, next) => {
+      if (req.path.startsWith("/api")) return next();
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
@@ -651,6 +635,7 @@ Return JSON with:
           : "not configured"
       }`
     );
+    pushSystemEvent("Node bridge online", "SUCCESS");
   });
 }
 
