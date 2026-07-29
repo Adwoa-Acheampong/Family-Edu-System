@@ -6,7 +6,7 @@ Usage:
   python -m db.migrate --dry-run    # list what would run
 
 Migrations live in db/migrations/*.sql sorted by filename.
-Each file is applied once inside a transaction and recorded in schema_migrations.
+Each file is applied once and recorded in schema_migrations.
 """
 
 from __future__ import annotations
@@ -85,12 +85,17 @@ async def migrate_up(*, dry_run: bool = False) -> list[str]:
             if version in done:
                 continue
             sql = path.read_text(encoding="utf-8")
-            logger.info("%s migration %s (%s)", "Would apply" if dry_run else "Applying", version, path.name)
+            logger.info(
+                "%s migration %s (%s)",
+                "Would apply" if dry_run else "Applying",
+                version,
+                path.name,
+            )
             if dry_run:
                 applied.append(version)
                 continue
             try:
-                await db.execute("BEGIN")
+                # executescript auto-commits; do not wrap in explicit BEGIN
                 await db.executescript(sql)
                 await db.execute(
                     "INSERT INTO schema_migrations (version, name) VALUES (?, ?)",
@@ -100,8 +105,7 @@ async def migrate_up(*, dry_run: bool = False) -> list[str]:
                 applied.append(version)
                 logger.info("Applied migration %s", version)
             except Exception:
-                await db.rollback()
-                logger.exception("Migration %s failed — rolled back", version)
+                logger.exception("Migration %s failed", version)
                 raise
 
     return applied

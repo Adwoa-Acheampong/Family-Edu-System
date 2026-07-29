@@ -76,7 +76,11 @@ jobs:
           pip install -r requirements.txt
 
       - name: Compile check
-        run: python -m compileall -q .
+        run: python -m compileall -q -f .
+
+      - name: Import smoke
+        run: |
+          python -c "import main; import services.ocr; print('imports-ok')"
 
       - name: Run migrations (temp DB)
         env:
@@ -90,4 +94,6 @@ jobs:
         env:
           DATABASE_URL: sqlite+aiosqlite:///./ci_test.db
           TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+          GOOGLE_CLIENT_ID: test-client.apps.googleusercontent.com
+          GOOGLE_CLIENT_SECRET: test-secret
         run: pytest -q --tb=short

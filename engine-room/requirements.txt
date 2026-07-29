@@ -18,7 +18,7 @@ google-auth-oauthlib>=1.2.0
 aiosqlite>=0.20.0
 cryptography>=43.0.0
 
-# AI / HTTP
+# AI / HTTP (Gemini OCR uses httpx REST — no baidu-aip)
 openai>=1.50.0
 youtube-transcript-api>=1.2.4,<2.0
 
@@ -26,5 +26,5 @@ youtube-transcript-api>=1.2.4,<2.0
 python-json-logger>=2.0.0
 
 # Testing
-pytest>=8.0.0
-pytest-asyncio>=0.24.0
+pytest>=8.0.0,<9
+pytest-asyncio>=0.24.0,<1.0
