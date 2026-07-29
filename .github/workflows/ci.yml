@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-node:
+    name: Lint & build (Node + Vite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Typecheck
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Production build
+        env:
+          NODE_ENV: production
+          VITE_APP_NAME: Family Edu Hub
+          VITE_API_BASE_URL: ""
+          VITE_ENGINE_ROOM_URL: ""
+          VITE_POLL_INTERVAL_MS: "15000"
+          VITE_HEALTH_POLL_MS: "10000"
+          VITE_ENABLE_ANALYTICS: "true"
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ github.sha }}
+          path: |
+            dist/
+          retention-days: 7
+
+  engine-room:
+    name: Engine Room (migrate + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: engine-room
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Compile check
+        run: python -m compileall -q .
+
+      - name: Run migrations (temp DB)
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./ci_migrate.db
+        run: |
+          python -m db.migrate --status
+          python -m db.migrate
+          python -m db.migrate --status
+
+      - name: Pytest
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./ci_test.db
+          TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        run: pytest -q --tb=short

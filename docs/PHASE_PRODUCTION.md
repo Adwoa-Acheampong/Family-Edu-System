@@ -1,60 +1,37 @@
-# Production wiring — deploy today
+# Production wiring
 
-## Phase status
+## Status
 
-| Phase | Status |
-|-------|--------|
-| 1 Config + React Query + live Architect telemetry | Done |
-| 2 React Router + Auth/UI context + protected routes | Done |
-| 3 Analytics / System Config / System Settings pages | Done |
-| 4 Plug secrets + `npm install` + run | **You** |
+| Phase | Item | Status |
+|-------|------|--------|
+| 1–5 | Config, Query, Router, system APIs, persistence, Learning Hub | Done |
+| 6 | Kobby ← assignments API | Done |
+| 7 | Badu ← assignments API | Done |
+| 8 | Young learners ← API quest strip + games | Done |
+| 9 | Plug secrets & run | **You** |
 
-## Install & run (Windows)
+## All personas
+
+| User | Dashboard |
+|------|-----------|
+| Aba | Live system / analytics / drive |
+| Kobby | API quests + submit + smart goals |
+| Badu | API lessons + checklist |
+| Pappy, Seth, Kweku, Shee | Play/story UI **+** live quest strip from API |
+
+Learning Hub is API-first for everyone.
+
+## Run
 
 ```bat
-cd C:\Users\lenovo\OneDrive\Desktop\Family-Edu-System
 git pull origin main
 npm install
-copy .env.example .env
-notepad .env
-```
-
-Set at minimum:
-
-```env
-GEMINI_API_KEY=...
-# optional
-VITE_ENGINE_ROOM_URL=http://localhost:8000
-```
-
-```bat
 npm run dev
 ```
 
-Open `http://localhost:3000/login`.
+```bat
+curl http://localhost:3000/api/assignments/seth
+curl http://localhost:3000/api/assignments/pappy
+```
 
-## Routes
-
-| Path | Access |
-|------|--------|
-| `/login` | Public |
-| `/dashboard` | Auth |
-| `/learning-hub` | Auth |
-| `/profile` | Auth |
-| `/analytics` | Auth |
-| `/system/config` | Admin (Aba) |
-| `/system/settings` | Admin |
-
-## API (Node)
-
-- `GET /api/system/status` — latency, keys, event log
-- `GET /api/analytics/summary?userId=` — charts + curriculum milestones
-- `GET/PUT /api/system/settings` — persisted runtime settings (in-memory; swap DB later)
-
-Ensure `server.ts` calls `registerSystemRoutes(app, mockAssignments)` (see import at top of server).
-
-## Next hardening (post-launch)
-
-- Persist `systemSettingsStore` to SQLite/Postgres
-- Replace assignment store with live Classroom only
-- Remove remaining persona mock quests when Classroom is live for kids
+Login as **Seth** or **Pappy** — strip under the header shows API quests; games still work below.

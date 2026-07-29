@@ -1,12 +1,31 @@
 import React from 'react';
 import { User } from '../types';
 import { ArchitectDashboard } from './ArchitectDashboard';
-import { Dashboard as PersonaDashboards } from './Dashboards';
+import { AnalystDashboard } from './AnalystDashboard';
+import { MasterDashboard } from './MasterDashboard';
+import { YoungLearnerShell } from './YoungLearnerShell';
 
-/** Routes Aba to live telemetry; other personas keep their interactive dashboards. */
+/**
+ * Live API coverage:
+ * - aba → system telemetry
+ * - kobby → gamified API quests
+ * - badu → instructional API lessons
+ * - pappy, seth, kweku, shee → play UI + API quest strip
+ */
 export function Dashboard({ user }: { user: User }) {
-  if (user.id === 'aba') {
-    return <ArchitectDashboard user={user} />;
+  switch (user.id) {
+    case 'aba':
+      return <ArchitectDashboard user={user} />;
+    case 'kobby':
+      return <AnalystDashboard user={user} />;
+    case 'badu':
+      return <MasterDashboard user={user} />;
+    case 'pappy':
+    case 'seth':
+    case 'kweku':
+    case 'shee':
+      return <YoungLearnerShell user={user} />;
+    default:
+      return <YoungLearnerShell user={user} />;
   }
-  return <PersonaDashboards user={user} />;
 }

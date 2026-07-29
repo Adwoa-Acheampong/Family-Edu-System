@@ -1,0 +1,74 @@
+name: Deploy Engine Room
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "engine-room/**"
+      - ".github/workflows/engine-room-deploy.yml"
+
+concurrency:
+  group: deploy-engine-room
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check secrets
+        env:
+          KEY: ${{ secrets.ER_DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.ER_DEPLOY_HOST }}
+        run: |
+          if [ -z "$KEY" ] || [ -z "$HOST" ]; then
+            echo "Engine Room deploy secrets not set — no-op."
+            echo "SKIP=1" >> $GITHUB_ENV
+          else
+            echo "SKIP=0" >> $GITHUB_ENV
+          fi
+
+      - name: Rsync + migrate + restart
+        if: env.SKIP == '0'
+        env:
+          KEY: ${{ secrets.ER_DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.ER_DEPLOY_HOST }}
+          USER: ${{ secrets.ER_DEPLOY_USER }}
+          PATH_REMOTE: ${{ secrets.ER_DEPLOY_PATH }}
+          PORT: ${{ secrets.ER_DEPLOY_PORT || 22 }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$PORT" -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/deploy_key -p $PORT" \
+            --exclude '.venv' \
+            --exclude '__pycache__' \
+            --exclude '*.db' \
+            --exclude '.env' \
+            engine-room/ "${USER}@${HOST}:${PATH_REMOTE}/"
+          ssh -i ~/.ssh/deploy_key -p "$PORT" "${USER}@${HOST}" bash -s << EOF
+          set -euo pipefail
+          cd "${PATH_REMOTE}"
+          if [ ! -d .venv ]; then python3 -m venv .venv; fi
+          . .venv/bin/activate
+          pip install -r requirements.txt
+          # Apply pending SQL migrations against production DATABASE_URL from .env
+          set -a
+          [ -f .env ] && . ./.env
+          set +a
+          python -m db.migrate --status
+          python -m db.migrate
+          if command -v systemctl >/dev/null 2>&1; then
+            sudo systemctl restart family-edu-engine || true
+          elif command -v pm2 >/dev/null 2>&1; then
+            pm2 restart family-edu-engine || true
+          else
+            echo "Restart uvicorn/systemd unit manually"
+          fi
+          EOF

@@ -3,6 +3,8 @@
 TOKEN_ENCRYPTION_KEY must be 64 hex characters (32 bytes).
 We derive a valid Fernet key via url-safe base64 encoding of those bytes.
 Generate: python -c "import secrets; print(secrets.token_hex(32))"
+
+Schema changes go in db/migrations/*.sql and are applied by db.migrate.
 """
 
 from __future__ import annotations
@@ -26,7 +28,6 @@ _fernet: Fernet | None = None
 
 
 def _get_fernet() -> Fernet:
-    """Build Fernet from TOKEN_ENCRYPTION_KEY (64 hex chars → 32 bytes → urlsafe b64)."""
     global _fernet
     if _fernet is not None:
         return _fernet
@@ -42,7 +43,6 @@ def _get_fernet() -> Fernet:
     except ValueError as e:
         raise RuntimeError("TOKEN_ENCRYPTION_KEY must be valid hex") from e
 
-    # Fernet requires url-safe base64-encoded 32-byte key
     fernet_key = base64.urlsafe_b64encode(key_bytes)
     _fernet = Fernet(fernet_key)
     return _fernet
@@ -56,56 +56,19 @@ def get_db_path() -> str:
 
 
 async def init_db() -> None:
+    """Apply all pending SQL migrations (idempotent)."""
     if aiosqlite is None:
         raise ImportError("aiosqlite is required. Install with: pip install aiosqlite")
 
+    from db.migrate import migrate_up
+
     db_path = get_db_path()
-    logger.info("Initializing database at %s", db_path)
-    async with aiosqlite.connect(db_path) as db:
-        db.row_factory = aiosqlite.Row
-        await db.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS tokens (
-                google_user_id TEXT PRIMARY KEY,
-                access_token_encrypted TEXT NOT NULL,
-                refresh_token_encrypted TEXT NOT NULL,
-                token_expiry TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-
-            CREATE TABLE IF NOT EXISTS profiles (
-                google_user_id TEXT PRIMARY KEY,
-                display_name TEXT NOT NULL,
-                email TEXT NOT NULL,
-                picture TEXT,
-                persona TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-
-            CREATE TABLE IF NOT EXISTS conversations (
-                conversation_id TEXT PRIMARY KEY,
-                google_user_id TEXT NOT NULL,
-                persona TEXT NOT NULL,
-                title TEXT,
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-
-            CREATE TABLE IF NOT EXISTS lessons (
-                lesson_id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                lesson_json TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_lessons_user_created
-                ON lessons(user_id, created_at DESC);
-            """
-        )
-        await db.commit()
-    logger.info("Database initialized successfully")
+    logger.info("Running migrations for database at %s", db_path)
+    applied = await migrate_up()
+    if applied:
+        logger.info("Applied migrations: %s", ", ".join(applied))
+    else:
+        logger.info("Database schema up to date")
 
 
 async def save_tokens(
@@ -218,7 +181,6 @@ async def save_conversation(
 
 
 async def save_lesson(lesson) -> None:
-    """Persist a validated LessonResource without splitting nested transcript data."""
     if aiosqlite is None:
         raise ImportError("aiosqlite is required")
     await init_db()

@@ -1,41 +1,18 @@
-/**
- * Mount these routes on the Express app in server.ts (after health):
- *   import { registerSystemRoutes } from "./server-routes-system";
- *   registerSystemRoutes(app, mockAssignments);
- */
 import type { Express } from "express";
-
-const systemSettingsStore: {
-  pollIntervalMs: number;
-  engineRoomUrl: string;
-  classroomCourseId: string;
-  enableNotifications: boolean;
-} = {
-  pollIntervalMs: 15000,
-  engineRoomUrl: process.env.VITE_ENGINE_ROOM_URL || "",
-  classroomCourseId: "",
-  enableNotifications: true,
-};
-
-const eventLog: { time: string; event: string; status: string }[] = [];
+import { getEvents, getSettings, pushEvent, saveSettings } from "./server-store";
 
 export function pushSystemEvent(event: string, status: string = "INFO") {
-  eventLog.unshift({
-    time: new Date().toISOString().slice(11, 19),
-    event,
-    status,
-  });
-  if (eventLog.length > 40) eventLog.pop();
+  pushEvent(event, status);
 }
 
 export function registerSystemRoutes(
   app: Express,
-  mockAssignments: Record<string, { status: string; points?: number; title?: string }[]>
+  mockAssignments: Record<string, { status: string; points?: number; title?: string; description?: string }[]>
 ) {
-  app.get("/api/system/status", async (_req, res) => {
+  app.get("/api/system/status", (_req, res) => {
     const started = Date.now();
-    // Measure self-latency of this process
-    const latencyMs = Date.now() - started + Math.floor(Math.random() * 5);
+    const latencyMs = Date.now() - started;
+    const events = getEvents(12);
     res.json({
       apiStatus: "ok",
       latencyMs,
@@ -45,8 +22,8 @@ export function registerSystemRoutes(
       googleOAuthConfigured: Boolean(
         process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
       ),
-      recentEvents: eventLog.length
-        ? eventLog.slice(0, 12)
+      recentEvents: events.length
+        ? events
         : [
             {
               time: new Date().toISOString().slice(11, 19),
@@ -67,7 +44,7 @@ export function registerSystemRoutes(
     const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const xpByDay = days.map((day, i) => ({
       day,
-      xp: Math.max(0, Math.round(xp / 7) + ((userId.charCodeAt(0) + i * 17) % 80)),
+      xp: Math.max(0, Math.round(xp / 7) + ((userId.charCodeAt(0) + i * 17) % 80) || 20),
     }));
 
     res.json({
@@ -78,46 +55,40 @@ export function registerSystemRoutes(
       currentStreak: pending > 0 ? 3 : 5,
       xpByDay,
       bySubject: [
-        { subject: "Core", count: completed + pending },
-        { subject: "Practice", count: pending },
-        { subject: "Review", count: completed },
+        { subject: "Core", count: Math.max(1, completed + pending) },
+        { subject: "Practice", count: Math.max(0, pending) },
+        { subject: "Review", count: Math.max(0, completed) },
       ],
       curriculumMilestones: [
         {
           phase: "NOW",
           title: list[0]?.title || "Active learning block",
-          description: "Derived from current assignment queue",
+          description: list[0]?.description || "Derived from current assignment queue",
         },
         {
           phase: "NEXT",
           title: list[1]?.title || "Upcoming focus",
-          description: "Next item in the queue",
+          description: list[1]?.description || "Next item in the queue",
         },
       ],
     });
   });
 
   app.get("/api/system/settings", (_req, res) => {
-    res.json({ ...systemSettingsStore });
+    res.json(getSettings());
   });
 
   app.put("/api/system/settings", (req, res) => {
     const body = req.body || {};
-    if (typeof body.pollIntervalMs === "number" && body.pollIntervalMs >= 5000) {
-      systemSettingsStore.pollIntervalMs = body.pollIntervalMs;
-    }
-    if (typeof body.engineRoomUrl === "string") {
-      systemSettingsStore.engineRoomUrl = body.engineRoomUrl;
-    }
-    if (typeof body.classroomCourseId === "string") {
-      systemSettingsStore.classroomCourseId = body.classroomCourseId;
-    }
-    if (typeof body.enableNotifications === "boolean") {
-      systemSettingsStore.enableNotifications = body.enableNotifications;
-    }
-    pushSystemEvent("System settings updated", "SUCCESS");
-    res.json({ ok: true, settings: systemSettingsStore });
+    const next = saveSettings({
+      pollIntervalMs: body.pollIntervalMs,
+      engineRoomUrl: body.engineRoomUrl,
+      classroomCourseId: body.classroomCourseId,
+      enableNotifications: body.enableNotifications,
+    });
+    pushEvent("System settings updated", "SUCCESS");
+    res.json({ ok: true, settings: next });
   });
 
-  pushSystemEvent("System routes registered", "SUCCESS");
+  pushEvent("System routes registered", "SUCCESS");
 }

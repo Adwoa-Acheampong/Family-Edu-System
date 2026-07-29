@@ -7,6 +7,9 @@ coverage/
 .env*
 !.env.example
 
+# Runtime data (settings / events)
+data/
+
 # Python / Engine Room
 __pycache__/
 **/__pycache__/
