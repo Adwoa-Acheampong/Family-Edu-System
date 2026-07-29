@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
 
 
 @pytest.fixture
- def tmp_db(tmp_path: Path, monkeypatch):
+def tmp_db(tmp_path: Path, monkeypatch):
     db_file = tmp_path / "test_migrate.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
     yield db_file
@@ -26,7 +25,6 @@ async def test_migrate_up_applies_all(tmp_db):
     assert status["pending"] == []
     assert "001" in status["applied"]
 
-    # Second run is no-op
     again = await migrate_up()
     assert again == []
 
