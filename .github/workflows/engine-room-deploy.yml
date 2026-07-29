@@ -1,8 +1,5 @@
 name: Deploy Engine Room
 
-# Optional separate deploy for FastAPI Engine Room.
-# Secrets: ER_DEPLOY_HOST, ER_DEPLOY_USER, ER_DEPLOY_SSH_KEY, ER_DEPLOY_PATH, ER_DEPLOY_PORT
-
 on:
   workflow_dispatch:
   push:
@@ -35,7 +32,7 @@ jobs:
             echo "SKIP=0" >> $GITHUB_ENV
           fi
 
-      - name: Rsync engine-room
+      - name: Rsync + migrate + restart
         if: env.SKIP == '0'
         env:
           KEY: ${{ secrets.ER_DEPLOY_SSH_KEY }}
@@ -61,6 +58,12 @@ jobs:
           if [ ! -d .venv ]; then python3 -m venv .venv; fi
           . .venv/bin/activate
           pip install -r requirements.txt
+          # Apply pending SQL migrations against production DATABASE_URL from .env
+          set -a
+          [ -f .env ] && . ./.env
+          set +a
+          python -m db.migrate --status
+          python -m db.migrate
           if command -v systemctl >/dev/null 2>&1; then
             sudo systemctl restart family-edu-engine || true
           elif command -v pm2 >/dev/null 2>&1; then

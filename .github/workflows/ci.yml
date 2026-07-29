@@ -27,7 +27,8 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
       - name: Typecheck
         run: npm run lint
@@ -36,7 +37,6 @@ jobs:
       - name: Production build
         env:
           NODE_ENV: production
-          # Public Vite placeholders — real URLs set at deploy host / secrets
           VITE_APP_NAME: Family Edu Hub
           VITE_API_BASE_URL: ""
           VITE_ENGINE_ROOM_URL: ""
@@ -54,9 +54,9 @@ jobs:
           retention-days: 7
 
   engine-room:
-    name: Engine Room (Python syntax)
+    name: Engine Room (migrate + tests)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: engine-room
@@ -73,8 +73,21 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install -r requirements.txt
 
       - name: Compile check
+        run: python -m compileall -q .
+
+      - name: Run migrations (temp DB)
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./ci_migrate.db
         run: |
-          python -m compileall -q .
+          python -m db.migrate --status
+          python -m db.migrate
+          python -m db.migrate --status
+
+      - name: Pytest
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///./ci_test.db
+          TOKEN_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        run: pytest -q --tb=short
