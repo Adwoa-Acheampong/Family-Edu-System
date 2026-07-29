@@ -7,7 +7,7 @@ import {
   getAnalyticsSummary,
   getSystemSettings,
   saveSystemSettings,
-  SystemSettingsPayload,
+  type SystemSettingsPayload,
 } from '../lib/api';
 
 export function useHealth() {
