@@ -4,6 +4,7 @@ import { getMockCourses } from '../data';
 import { ClassroomCard, Assignment } from './ClassroomCard';
 import { SubmissionWidget } from './SubmissionWidget';
 import { LessonBuilder } from './LessonBuilder';
+import { DocumentUploader } from './DocumentUploader';
 import {
   getAssignments,
   hasGoogleSession,
@@ -331,6 +332,7 @@ export function LearningHub({ user }: { user: User }) {
           </section>
 
           <LessonBuilder user={user} />
+          <DocumentUploader user={user} />
         </>
       )}
 

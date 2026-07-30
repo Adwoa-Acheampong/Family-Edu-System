@@ -11,7 +11,7 @@ import { LearningHub, MyProfile } from './components/Views';
 import { AnalyticsPage } from './pages/AnalyticsPage';
 import { SystemConfigPage } from './pages/SystemConfigPage';
 import { SystemSettingsPage } from './pages/SystemSettingsPage';
-import { exchangeGoogleCode, isEngineRoomConfigured } from './lib/api';
+import { exchangeGoogleCode, isEngineRoomConfigured, setGoogleSession } from './lib/api';
 import { appConfig } from './config/env';
 
 function ProtectedShell() {
@@ -60,6 +60,7 @@ function LoginRoute() {
 
 function OAuthBootstrap() {
   const { setNotice } = useUI();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -67,8 +68,19 @@ function OAuthBootstrap() {
   }, []);
 
   useEffect(() => {
-    if (!isEngineRoomConfigured) return;
     const params = new URLSearchParams(window.location.search);
+    
+    // Handle worker redirect with google_session
+    const googleSession = params.get('google_session');
+    if (googleSession && user) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setGoogleSession('backend-managed', googleSession);
+      setNotice('Google Classroom connected successfully.');
+      return;
+    }
+
+    if (!isEngineRoomConfigured) return;
+    
     const code = params.get('code');
     const returnedState = params.get('state');
     const oauthError = params.get('error');
@@ -96,7 +108,7 @@ function OAuthBootstrap() {
       .catch((err) => {
         setNotice(err instanceof Error ? err.message : 'Google connection failed.');
       });
-  }, [navigate, setNotice]);
+  }, [navigate, setNotice, user]);
 
   return null;
 }

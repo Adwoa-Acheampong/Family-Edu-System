@@ -25,7 +25,7 @@ function bool(key: string, fallback: boolean): boolean {
 }
 
 /** Default local Engine Room so transcript/notebook ingest works out of the box. */
-const DEFAULT_ENGINE_ROOM = 'http://localhost:8000';
+const DEFAULT_ENGINE_ROOM = '';
 
 export const appConfig = {
   appName: str('VITE_APP_NAME', 'Family Edu Hub'),

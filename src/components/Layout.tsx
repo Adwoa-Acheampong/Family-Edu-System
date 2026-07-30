@@ -221,6 +221,17 @@ export function Layout({ user, children }: LayoutProps) {
         </main>
       </div>
 
+      {!isAiOpen && (
+        <button
+          onClick={openAi}
+          className="fixed bottom-6 right-6 w-14 h-14 rounded-full flex items-center justify-center shadow-2xl z-40 transition-transform hover:scale-105 active:scale-95"
+          style={{ backgroundColor: user.themeHex, color: '#000' }}
+          aria-label="Open AI Assistant"
+        >
+          <MessageSquare size={24} />
+        </button>
+      )}
+
       <AIAssistant user={user} isOpen={isAiOpen} onClose={closeAi} />
 
       {isSidebarOpen && (

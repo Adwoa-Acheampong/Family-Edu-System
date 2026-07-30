@@ -1,0 +1,15 @@
+name = "family-edu-system"
+account_id = "a8eab5d3dd5b1612de85cce6e49ec386"
+main = "dist/worker.mjs"
+workers_dev = true
+compatibility_date = "2024-09-01"
+assets = { directory = "./dist/public", binding = "ASSETS" }
+
+[[d1_databases]]
+binding = "DB"
+  database_name = "family-edu-db"
+preview_database_id = "65b1ca13-63f9-473d-84b3-d5faf54bcfe8"
+database_id = "65b1ca13-63f9-473d-84b3-d5faf54bcfe8"
+
+[vars]
+APP_URL = "https://family-edu-system.saintaba.workers.dev"
