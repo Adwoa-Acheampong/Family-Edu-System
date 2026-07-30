@@ -251,9 +251,58 @@ YOUR CAPABILITIES & RULES:
       }
     }
 
+    // ── OpenRouter fallback when all Gemini models fail ──
+    if (!aiText) {
+      const openRouterKey = process.env.OPENROUTER_API_KEY;
+      if (openRouterKey) {
+        const orModels = [
+          "google/gemini-2.0-flash-001",
+          "google/gemini-2.5-flash-preview",
+          "meta-llama/llama-3.1-8b-instruct",
+          "openai/gpt-4o-mini"
+        ];
+        for (const orModel of orModels) {
+          try {
+            const orRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${openRouterKey}`,
+                "HTTP-Referer": "https://family-edu-system.saintaba.workers.dev",
+                "X-Title": "Family Edu Hub"
+              },
+              body: JSON.stringify({
+                model: orModel,
+                messages: [
+                  { role: "system", content: systemPrompt },
+                  { role: "user", content: message }
+                ],
+                max_tokens: 1024,
+                temperature: 0.8
+              })
+            });
+            if (orRes.ok) {
+              const orData = await orRes.json() as any;
+              aiText = orData?.choices?.[0]?.message?.content || "";
+              if (aiText) break;
+            } else {
+              const errBody = await orRes.text().catch(() => "");
+              lastError = `OpenRouter ${orModel} returned ${orRes.status}: ${errBody.substring(0, 200)}`;
+              console.error(lastError);
+              continue;
+            }
+          } catch (orErr: any) {
+            lastError = `OpenRouter ${orModel} failed: ${orErr.message}`;
+            console.error(lastError);
+            continue;
+          }
+        }
+      }
+    }
+
     if (!aiText) {
       return new Response(JSON.stringify({
-        response: `⚠️ All AI models are temporarily rate-limited. Please wait a moment and try again.\n\nTechnical detail: ${lastError}`,
+        response: `⚠️ All AI providers are temporarily unavailable. Please wait a moment and try again.\n\nTechnical detail: ${lastError}`,
         conversationId: threadId
       }), { headers: { "Content-Type": "application/json" } });
     }
