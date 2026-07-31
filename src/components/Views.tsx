@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { User } from '../types';
-import { getMockCourses } from '../data';
 import { ClassroomCard, Assignment } from './ClassroomCard';
 import { SubmissionWidget } from './SubmissionWidget';
 import { LessonBuilder } from './LessonBuilder';
@@ -24,14 +23,14 @@ interface Course {
   progress: number;
 }
 
-function coursesFromAssignments(assignments: Assignment[], fallbackUserId: string): Course[] {
+function coursesFromAssignments(assignments: Assignment[]): Course[] {
   const byCourse = new Map<string, Assignment[]>();
   for (const a of assignments) {
     const key = a.courseId || a.courseName || 'default';
     if (!byCourse.has(key)) byCourse.set(key, []);
     byCourse.get(key)!.push(a);
   }
-  if (byCourse.size === 0) return getMockCourses(fallbackUserId);
+  if (byCourse.size === 0) return [];
   return Array.from(byCourse.entries()).map(([id, items]) => {
     const done = items.filter((x) => x.status !== 'PENDING').length;
     return {
