@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "concurrently \"vite build --watch\" \"esbuild src/worker.ts --bundle --platform=neutral --format=esm --packages=external --sourcemap --watch --outfile=dist/worker.mjs\" \"wrangler dev\"",
     "build": "vite build && esbuild src/worker.ts --bundle --platform=neutral --format=esm --packages=external --sourcemap --outfile=dist/worker.mjs",
+    "deploy": "npm run build && wrangler deploy",
     "start": "node dist/worker.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",

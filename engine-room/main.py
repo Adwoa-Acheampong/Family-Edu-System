@@ -387,6 +387,7 @@ async def generate_curriculum(request: CurriculumRequest):
         raise HTTPException(status_code=502, detail=f"Curriculum generation failed: {e}")
 
 
+
 @app.post("/v1/lessons/ingest", response_model=LessonIngestResponse)
 async def ingest_lesson(
     request: LessonIngestRequest,
@@ -485,14 +486,18 @@ async def get_lessons(
 
 @app.get("/v1/progress-analytics", response_model=ProgressAnalytics)
 async def progress_analytics(
-    authorization: Optional[str] = Header(None),
+    x_google_user_id: Optional[str] = Header(None, alias="X-Google-User-Id"),
 ):
-    return ProgressAnalytics(
-        completionPercent=0.0,
-        currentStreak=0,
-        totalAssignments=0,
-        completedAssignments=0,
-    )
+    from services.analytics import get_user_analytics
+    
+    # Extract user ID or default to "aba" for development
+    user_id = x_google_user_id or "aba"
+    
+    try:
+        return await get_user_analytics(user_id)
+    except Exception as e:
+        logger.error("Progress analytics failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Analytics failed: {e}")
 
 
 @app.exception_handler(HTTPException)

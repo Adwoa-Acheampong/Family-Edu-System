@@ -1,6 +1,26 @@
 import { Router } from "itty-router";
-import { getAssignments, saveOAuthToken, getOAuthToken } from "./db";
+import {
+  getAssignments, updateAssignmentStatus, saveOAuthToken, getOAuthToken,
+  getModules, createModule, updateModuleStatus,
+  logProgress, getAnalyticsData,
+  getDriveUsage as fetchDriveUsage, listDriveFiles as fetchDriveFiles,
+  listClassroomCourses as fetchClassroomCourses, listClassroomAssignments,
+  callGoogleAPI
+} from "./db";
 import { D1Database } from "@cloudflare/workers-types";
+
+// Helper: resolve OAuth access token from request headers or sessionId param
+async function resolveAccessToken(request: any, db: D1Database): Promise<string | null> {
+  const authHeader = request.headers.get("Authorization");
+  if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7);
+  const sessionId = request.headers.get("X-Google-User-Id")
+    || new URL(request.url).searchParams.get("sessionId");
+  if (sessionId) {
+    const session = await getOAuthToken(sessionId, db);
+    return (session as any)?.access_token || null;
+  }
+  return null;
+}
 
 // Helper to parse JSON body
 async function json(req: Request) {
@@ -34,34 +54,43 @@ router.get("/api/system/status", async (request) => {
 
 
 router.post("/api/sync-classroom", async (request) => {
+  const env = (request as any).env as { DB: D1Database };
   const body = await json(request);
   const userId = body?.userId || "aba";
-  // For demo we just return empty assignments – real implementation would call Google Classroom
-  const assignments = [];
-  return new Response(JSON.stringify({ assignments, courses: [] }), { headers: { "Content-Type": "application/json" } });
+  const accessToken = await resolveAccessToken(request, env.DB);
+
+  if (!accessToken) {
+    // No Google session — return assignments from D1 only
+    const assignments = await getAssignments(userId, env.DB);
+    const modules = await getModules(userId, env.DB);
+    return new Response(JSON.stringify({ assignments, modules, courses: [] }), { headers: { "Content-Type": "application/json" } });
+  }
+
+  try {
+    const courses = await fetchClassroomCourses(accessToken);
+    let allAssignments: any[] = [];
+    for (const course of courses.slice(0, 5)) {
+      try {
+        const cw = await listClassroomAssignments(course.id, accessToken);
+        allAssignments = allAssignments.concat(cw.map((a: any) => ({ ...a, courseName: course.name })));
+      } catch { /* skip courses without access */ }
+    }
+    return new Response(JSON.stringify({ assignments: allAssignments, courses }), { headers: { "Content-Type": "application/json" } });
+  } catch (err: any) {
+    const dbAssignments = await getAssignments(userId, env.DB);
+    return new Response(JSON.stringify({ assignments: dbAssignments, courses: [], error: err.message }), { headers: { "Content-Type": "application/json" } });
+  }
 });
 
 router.get("/api/analytics/summary", async (request) => {
-  return new Response(JSON.stringify({
-    source: "worker-api",
-    completedAssignments: 5,
-    pendingAssignments: 2,
-    xpLast7Days: 140,
-    currentStreak: 3,
-    xpByDay: [
-      { day: "Mon", xp: 20 }, { day: "Tue", xp: 30 }, { day: "Wed", xp: 15 },
-      { day: "Thu", xp: 25 }, { day: "Fri", xp: 20 }, { day: "Sat", xp: 10 }, { day: "Sun", xp: 20 }
-    ],
-    bySubject: [
-      { subject: "Core", count: 4 },
-      { subject: "Practice", count: 2 },
-      { subject: "Review", count: 1 }
-    ],
-    curriculumMilestones: [
-      { phase: "NOW", title: "Active learning block", description: "Derived from current assignment queue" },
-      { phase: "NEXT", title: "Upcoming focus", description: "Next item in the queue" }
-    ]
-  }), { headers: { "Content-Type": "application/json" }});
+  const env = (request as any).env as { DB: D1Database };
+  const userId = new URL(request.url).searchParams.get("userId") || "aba";
+  try {
+    const data = await getAnalyticsData(userId, env.DB);
+    return new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" }});
+  } catch (err: any) {
+    return new Response(JSON.stringify({ source: "error", error: err.message, completedAssignments: 0, pendingAssignments: 0, xpLast7Days: 0, currentStreak: 0, xpByDay: [], bySubject: [], curriculumMilestones: [] }), { headers: { "Content-Type": "application/json" }});
+  }
 });
 
 router.get("/api/system/settings", async () => {
@@ -73,11 +102,16 @@ router.get("/api/system/settings", async () => {
   }), { headers: { "Content-Type": "application/json" }});
 });
 
-router.get("/api/drive-usage", async () => {
-  return new Response(JSON.stringify({
-    usedBytes: 15.5 * 1024 * 1024 * 1024,
-    totalBytes: 100 * 1024 * 1024 * 1024
-  }), { headers: { "Content-Type": "application/json" }});
+router.get("/api/drive-usage", async (request) => {
+  const env = (request as any).env as { DB: D1Database };
+  const accessToken = await resolveAccessToken(request, env.DB);
+  if (accessToken) {
+    try {
+      const usage = await fetchDriveUsage(accessToken);
+      return new Response(JSON.stringify(usage), { headers: { "Content-Type": "application/json" }});
+    } catch { /* fall through to default */ }
+  }
+  return new Response(JSON.stringify({ usedBytes: 0, totalBytes: 15 * 1024 * 1024 * 1024, note: "Connect Google to see real usage" }), { headers: { "Content-Type": "application/json" }});
 });
 
 router.post("/api/documents/upload", async (request) => {
@@ -133,16 +167,48 @@ router.post("/api/documents/upload", async (request) => {
   }
 });
 
-router.get("/api/google/drive/files", async () => {
-  return new Response(JSON.stringify({ files: [] }), { headers: { "Content-Type": "application/json" }});
+router.get("/api/google/drive/files", async (request) => {
+  const env = (request as any).env as { DB: D1Database };
+  const accessToken = await resolveAccessToken(request, env.DB);
+  if (!accessToken) return new Response(JSON.stringify({ files: [], note: "Connect Google to see files" }), { headers: { "Content-Type": "application/json" }});
+  try {
+    const files = await fetchDriveFiles(accessToken);
+    return new Response(JSON.stringify({ files }), { headers: { "Content-Type": "application/json" }});
+  } catch (err: any) {
+    return new Response(JSON.stringify({ files: [], error: err.message }), { headers: { "Content-Type": "application/json" }});
+  }
 });
 
-router.get("/api/google/classroom/courses", async () => {
-  return new Response(JSON.stringify({ courses: [] }), { headers: { "Content-Type": "application/json" }});
+router.get("/api/google/classroom/courses", async (request) => {
+  const env = (request as any).env as { DB: D1Database };
+  const accessToken = await resolveAccessToken(request, env.DB);
+  if (!accessToken) return new Response(JSON.stringify({ courses: [], note: "Connect Google to see courses" }), { headers: { "Content-Type": "application/json" }});
+  try {
+    const courses = await fetchClassroomCourses(accessToken);
+    return new Response(JSON.stringify({ courses }), { headers: { "Content-Type": "application/json" }});
+  } catch (err: any) {
+    return new Response(JSON.stringify({ courses: [], error: err.message }), { headers: { "Content-Type": "application/json" }});
+  }
 });
 
-router.post("/api/suggest-goals", async () => {
-  return new Response(JSON.stringify({ goals: [{ id: "1", title: "Setup Engine Room for Real AI" }] }), { headers: { "Content-Type": "application/json" }});
+router.post("/api/suggest-goals", async (request) => {
+  const env = (request as any).env as { DB: D1Database };
+  const body = await json(request);
+  const userId = (body as any)?.user?.id || "aba";
+  const modules = await getModules(userId, env.DB);
+  const assignments = await getAssignments(userId, env.DB);
+  const totalItems = modules.length + assignments.length;
+  const suggestions = [];
+  if (totalItems === 0) {
+    suggestions.push({ id: "1", type: "MAIN QUEST", title: "Start your first study topic", desc: "Open the AI chat and say hello to begin your journey.", xp: 100 });
+  } else {
+    const pending = assignments.filter(a => a.status === "PENDING").length + modules.filter(m => m.status !== "COMPLETED").length;
+    if (pending > 0) {
+      suggestions.push({ id: "2", type: "DAILY TASK", title: "Clear Pending Work", desc: `Complete ${pending} pending modules or assignments.`, xp: 250 });
+    }
+    suggestions.push({ id: "3", type: "SIDE QUEST", title: "Explore a new learning topic", desc: "Ask the AI about a topic you've never learned before.", xp: 150 });
+  }
+  return new Response(JSON.stringify({ suggestions }), { headers: { "Content-Type": "application/json" }});
 });
 
 router.post("/api/ai-chat", async (request) => {
@@ -321,11 +387,90 @@ YOUR CAPABILITIES & RULES:
   }
 });
 
-router.post("/api/generate-curriculum", async () => {
-  return new Response(JSON.stringify({ curriculum: "Mock curriculum generated." }), { headers: { "Content-Type": "application/json" }});
+router.post("/api/generate-curriculum", async (request) => {
+  const env = (request as any).env as { DB: D1Database };
+  const body = await json(request) as any;
+  const { topic, userName, userId, persona, age } = body;
+  const uid = userId || userName?.toLowerCase() || "aba";
+  const apiKey = process.env.GEMINI_API_KEY;
+  const openRouterKey = process.env.OPENROUTER_API_KEY;
+
+  const prompt = `Generate a structured learning curriculum for a ${age || 27}-year-old named ${userName || "user"} (persona: ${persona || "Learner"}) on the topic: "${topic || "General Learning"}". Return a JSON array of 4-6 modules. Each module: {"title": "...", "description": "...", "objectives": "bullet points", "resources": "URLs or book titles", "estimated_hours": number}. Return ONLY the JSON array, no markdown.`;
+
+  let modulesJson = "[]";
+  let debugLog = "";
+  // Try OpenRouter first (since Gemini quota might be exhausted)
+  if (openRouterKey) {
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${openRouterKey}`, "HTTP-Referer": "https://family-edu-system.saintaba.workers.dev", "X-Title": "Family Edu Hub" },
+        body: JSON.stringify({ model: "google/gemini-2.0-flash-001", messages: [{ role: "user", content: prompt }], max_tokens: 2048, temperature: 0.7 })
+      });
+      if (res.ok) {
+        const data = await res.json() as any;
+        modulesJson = data?.choices?.[0]?.message?.content || "[]";
+        debugLog = `OpenRouter success: ${modulesJson.substring(0, 50)}`;
+      } else {
+        const errText = await res.text().catch(() => "");
+        debugLog = `Curriculum OpenRouter ${res.status}: ${errText.substring(0, 300)}`;
+        console.error(debugLog);
+      }
+    } catch (e: any) {
+      debugLog = `Curriculum OpenRouter error: ${e.message}`;
+      console.error(debugLog);
+    }
+  }
+
+  // Parse and save modules to D1
+  try {
+    const cleaned = modulesJson.replace(/```json\n?/g, "").replace(/```/g, "").trim();
+    const modules = JSON.parse(cleaned);
+    if (!Array.isArray(modules) || modules.length === 0) {
+      return new Response(JSON.stringify({ curriculum: [], saved: 0, debug: debugLog || "AI returned empty or non-array", raw: cleaned.substring(0, 500) }), { headers: { "Content-Type": "application/json" }});
+    }
+    for (let i = 0; i < modules.length; i++) {
+      const m = modules[i];
+      await createModule({
+        id: crypto.randomUUID(),
+        user_id: uid,
+        title: m.title,
+        description: m.description || "",
+        objectives: m.objectives || "",
+        resources: m.resources || "",
+        order_index: i,
+        status: "NOT_STARTED" as const,
+        estimated_hours: m.estimated_hours || 1
+      }, env.DB);
+    }
+    return new Response(JSON.stringify({ curriculum: modules, saved: modules.length }), { headers: { "Content-Type": "application/json" }});
+  } catch (err: any) {
+    return new Response(JSON.stringify({ curriculum: modulesJson.substring(0, 500), error: err.message }), { headers: { "Content-Type": "application/json" }});
+  }
 });
 
+// ── Module endpoints ──
 
+router.get("/api/modules/:userId", async (request) => {
+  const { userId } = request.params as { userId: string };
+  const env = (request as any).env as { DB: D1Database };
+  const modules = await getModules(userId, env.DB);
+  return new Response(JSON.stringify({ modules }), { headers: { "Content-Type": "application/json" } });
+});
+
+router.post("/api/modules/:moduleId/status", async (request) => {
+  const { moduleId } = request.params as { moduleId: string };
+  const env = (request as any).env as { DB: D1Database };
+  const body = await json(request) as any;
+  const { status, userId } = body;
+  await updateModuleStatus(moduleId, status, env.DB);
+  if (status === "COMPLETED" && userId) {
+    await logProgress({ id: crypto.randomUUID(), user_id: userId, module_id: moduleId, assignment_id: null, action: "MODULE_COMPLETED", xp_earned: 50 }, env.DB);
+  }
+  return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
+});
+
+// ── Assignment endpoints ──
 
 router.get("/api/assignments/:userId", async (request) => {
   const { userId } = request.params as { userId: string };
@@ -335,9 +480,14 @@ router.get("/api/assignments/:userId", async (request) => {
 });
 
 router.post("/api/submit-assignment", async (request) => {
-  const body = await json(request);
-  const { userId, courseWorkId } = body;
-  // Here we would update the assignment status in D1 – omitted for brevity
+  const env = (request as any).env as { DB: D1Database };
+  const body = await json(request) as any;
+  const { userId, courseWorkId, assignmentId } = body;
+  const id = assignmentId || courseWorkId;
+  if (id) {
+    await updateAssignmentStatus(id, "SUBMITTED", env.DB);
+    await logProgress({ id: crypto.randomUUID(), user_id: userId, module_id: null, assignment_id: id, action: "ASSIGNMENT_SUBMITTED", xp_earned: 25 }, env.DB);
+  }
   return new Response(JSON.stringify({ status: "submitted", userId, courseWorkId }), { headers: { "Content-Type": "application/json" } });
 });
 
