@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, Message } from '../types';
 import { X, Send, Bot, User as UserIcon, Maximize2, Minimize2 } from 'lucide-react';
 import { cn } from '../utils';
-import { sendChatMessage } from '../lib/api';
+import { sendChatMessage, generateCurriculum } from '../lib/api';
 
 interface AIAssistantProps {
   user: User;
@@ -64,6 +64,27 @@ export function AIAssistant({ user, isOpen, onClose }: AIAssistantProps) {
     setIsTyping(true);
 
     try {
+      if (messageText.toLowerCase().startsWith('/generate ')) {
+        const topic = messageText.substring(10).trim();
+        await generateCurriculum({
+          topic,
+          userName: user.name,
+          userId: user.id,
+          persona: user.persona,
+          age: user.age
+        });
+        
+        const aiResponse: Message = {
+          id: (Date.now() + 1).toString(),
+          text: `I just generated a new learning module for "${topic}"! Please check your dashboard or refresh to see the new modules.`,
+          sender: 'ai',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, aiResponse]);
+        setIsTyping(false);
+        return;
+      }
+
       const data = await sendChatMessage({
         message: messageText,
         persona: user.persona,
@@ -203,7 +224,7 @@ export function AIAssistant({ user, isOpen, onClose }: AIAssistantProps) {
           </button>
         </div>
         <div className="text-center mt-3">
-          <span className="text-[9px] text-gray-600 tracking-widest uppercase">Powered by Gemini</span>
+          <span className="text-[9px] text-gray-600 tracking-widest uppercase">Powered by Gemini · Tip: Type /generate [topic] to create a curriculum</span>
         </div>
       </div>
     </div>

@@ -24,7 +24,7 @@ import {
 import { User } from '../types';
 import { ClassroomCard, Assignment } from './ClassroomCard';
 import { SubmissionWidget } from './SubmissionWidget';
-import { getAssignments, submitAssignment, suggestGoals } from '../lib/api';
+import { getAssignments, getModules, submitAssignment, suggestGoals } from '../lib/api';
 import { useAnalytics } from '../hooks/useLiveData';
 import { cn } from '../utils';
 
@@ -52,8 +52,11 @@ export function AnalystDashboard({ user }: { user: User }) {
     setLoading(true);
     setError('');
     try {
-      const data = await getAssignments(user.id);
-      const list: Assignment[] = (data.assignments || []).map((a: any) => ({
+      const [assignData, moduleData] = await Promise.all([
+        getAssignments(user.id),
+        getModules(user.id).catch(() => ({ modules: [] }))
+      ]);
+      const list: Assignment[] = (assignData.assignments || []).map((a: any) => ({
         id: a.id,
         courseId: a.courseId,
         title: a.title,
@@ -62,7 +65,17 @@ export function AnalystDashboard({ user }: { user: User }) {
         points: a.points,
         status: a.status || 'PENDING',
       }));
-      setQuests(list);
+      
+      const moduleList: Assignment[] = (moduleData.modules || []).map((m: any) => ({
+        id: m.id,
+        courseId: 'module_curriculum',
+        title: m.title,
+        description: m.description || m.objectives,
+        points: 50,
+        status: m.status === 'COMPLETED' ? 'GRADED' : 'PENDING'
+      }));
+      
+      setQuests([...list, ...moduleList]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load quests');
       setQuests([]);

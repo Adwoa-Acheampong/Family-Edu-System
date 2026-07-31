@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Assignment } from '../components/ClassroomCard';
-import { getAssignments, submitAssignment } from '../lib/api';
+import { getAssignments, getModules, submitAssignment } from '../lib/api';
 
 export function useAssignments(userId: string) {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
@@ -11,8 +11,11 @@ export function useAssignments(userId: string) {
     setLoading(true);
     setError('');
     try {
-      const data = await getAssignments(userId);
-      const list: Assignment[] = (data.assignments || []).map((a: any) => ({
+      const [assignData, moduleData] = await Promise.all([
+        getAssignments(userId),
+        getModules(userId).catch(() => ({ modules: [] }))
+      ]);
+      const list: Assignment[] = (assignData.assignments || []).map((a: any) => ({
         id: a.id,
         courseId: a.courseId,
         courseName: a.courseName,
@@ -22,7 +25,16 @@ export function useAssignments(userId: string) {
         points: a.points,
         status: a.status || 'PENDING',
       }));
-      setAssignments(list);
+      const moduleList: Assignment[] = (moduleData.modules || []).map((m: any) => ({
+        id: m.id,
+        courseId: 'module_curriculum',
+        courseName: 'AI Curriculum',
+        title: m.title,
+        description: m.description || m.objectives,
+        points: 50,
+        status: m.status === 'COMPLETED' ? 'GRADED' : 'PENDING'
+      }));
+      setAssignments([...list, ...moduleList]);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load assignments');
       setAssignments([]);

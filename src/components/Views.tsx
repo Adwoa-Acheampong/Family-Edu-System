@@ -7,6 +7,7 @@ import { LessonBuilder } from './LessonBuilder';
 import { DocumentUploader } from './DocumentUploader';
 import {
   getAssignments,
+  getModules,
   hasGoogleSession,
   isEngineRoomConfigured,
   startGoogleOAuth,
@@ -57,8 +58,11 @@ export function LearningHub({ user }: { user: User }) {
     setLoading(true);
     setSyncError('');
     try {
-      const data = await getAssignments(user.id);
-      const list: Assignment[] = (data.assignments || []).map((a: any) => ({
+      const [assignData, moduleData] = await Promise.all([
+        getAssignments(user.id),
+        getModules(user.id).catch(() => ({ modules: [] }))
+      ]);
+      const list: Assignment[] = (assignData.assignments || []).map((a: any) => ({
         id: a.id,
         courseId: a.courseId,
         courseName: a.courseName,
@@ -68,9 +72,19 @@ export function LearningHub({ user }: { user: User }) {
         points: a.points,
         status: a.status || 'PENDING',
       }));
-      setAssignments(list);
-      setCourses(coursesFromAssignments(list, user.id));
-      setDataSource(list.length ? 'api' : 'empty');
+      const moduleList: Assignment[] = (moduleData.modules || []).map((m: any) => ({
+        id: m.id,
+        courseId: 'module_curriculum',
+        courseName: 'AI Curriculum',
+        title: m.title,
+        description: m.description || m.objectives,
+        points: 50,
+        status: m.status === 'COMPLETED' ? 'GRADED' : 'PENDING'
+      }));
+      const combinedList = [...list, ...moduleList];
+      setAssignments(combinedList);
+      setCourses(coursesFromAssignments(combinedList, user.id));
+      setDataSource(combinedList.length ? 'api' : 'empty');
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : 'Could not load assignments');
       setAssignments([]);

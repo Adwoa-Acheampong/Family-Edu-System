@@ -51,6 +51,10 @@ export async function getAssignments(userId: string) {
   return apiGet(`/api/assignments/${encodeURIComponent(userId)}`);
 }
 
+export async function getModules(userId: string) {
+  return apiGet(`/api/modules/${encodeURIComponent(userId)}`);
+}
+
 export async function syncClassroom(userId: string, courseId?: string) {
   return apiFetch(
     '/api/sync-classroom',
