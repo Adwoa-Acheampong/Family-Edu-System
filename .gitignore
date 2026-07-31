@@ -1,1 +1,206 @@
-Nothing should be ignored based on the provided file changes. The only modified file is a test Python file (`engine-room/tests/test_health.py`), which is source code and should not be ignored.
+```
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+build/
+coverage/
+htmlcov/
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# Compiled files
+*.pyc
+__pycache__/
+*.o
+*.obj
+*.out
+*.exe
+*.dll
+*.so
+*.a
+
+# Package managers
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Testing
+.mypy_cache/
+.pytest_cache/
+coverage.xml
+*.gcov
+*.lcov
+
+# Java/Scala
+*.class
+*.jar
+*.war
+*.ear
+hs_err_pid*
+
+# C/C++
+*.i
+*.s
+*.su
+*.gcda
+*.gcno
+*.gcov
+
+# Go
+*.out
+*.prof
+*.trace
+
+# Ruby
+*.gem
+.bundle/
+vendor/bundle/
+
+# Rust
+target/
+Cargo.lock
+
+# .NET
+bin/
+obj/
+*.userprefs
+
+# Elixir
+.erlang.cookie
+.eunit/
+.cover/
+
+# PHP
+vendor/
+
+# Python virtual environments
+.venv/
+venv/
+ENV/
+
+# Node.js
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Logs
+logs/
+*.log
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# Temporary folders
+tmp/
+temp/
+
+# Production builds
+dist/
+build/
+
+# Dependency directories
+node_modules/
+julia-*/
+zig*/
+
+# Generated class file for Gradle
+.gradle/
+
+# Local configuration files (specific to the local installation)
+*.local
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Icon?
+!Icon-16.png
+
+# Android Studio
+*.iml
+*.iws
+.idea/
+
+# JetBrains IDEs
+*.iws
+.idea/
+
+# Eclipse
+.metadata
+bin/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.settings/
+.loadpath
+.recommenders
+
+# Visual Studio Code
+.vscode/
+
+# Visual Studio
+.vs/
+*.VC.db
+*.VC.VC.opendb
+
+# Various
+*.dmg
+*.iso
+*.tar
+*.zip
+*.gz
+*.rar
+*.7z
+*.tgz
+*.tbz2
+*.txz
+*.bz2
+*.xz
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+*.zst
+```
