@@ -100,6 +100,7 @@ export async function suggestGoals(user: unknown) {
 
 export async function sendChatMessage(chatData: {
   message: string;
+  history?: { role: string; content: string }[];
   persona: string;
   userName: string;
   age: number;
@@ -110,6 +111,7 @@ export async function sendChatMessage(chatData: {
   if (isEngineRoomConfigured) {
     return apiFetch('/v1/ai-chat', {
       message: chatData.message,
+      history: chatData.history,
       persona: chatData.persona,
       conversationId: chatData.conversationId,
     });

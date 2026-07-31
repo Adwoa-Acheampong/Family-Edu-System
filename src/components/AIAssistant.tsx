@@ -85,8 +85,14 @@ export function AIAssistant({ user, isOpen, onClose }: AIAssistantProps) {
         return;
       }
 
+      const history = [...messages, newMsg].map(m => ({
+        role: m.sender === 'ai' ? 'model' : 'user',
+        content: m.text
+      })).slice(-10); // Keep last 10 messages for context
+
       const data = await sendChatMessage({
         message: messageText,
+        history,
         persona: user.persona,
         userName: user.name,
         age: user.age,
@@ -97,13 +103,42 @@ export function AIAssistant({ user, isOpen, onClose }: AIAssistantProps) {
 
       conversationIdRef.current = data.conversationId;
 
+      let aiResponseText = data.response;
+      let triggerTopic = '';
+      
+      const triggerMatch = aiResponseText.match(/\[MODULE_TRIGGER:\s*(.*?)\]/i);
+      if (triggerMatch) {
+        triggerTopic = triggerMatch[1].trim();
+        aiResponseText = aiResponseText.replace(triggerMatch[0], '').trim();
+      }
+
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
-        text: data.response,
+        text: aiResponseText,
         sender: 'ai',
         timestamp: new Date()
       };
       setMessages(prev => [...prev, aiResponse]);
+      
+      if (triggerTopic) {
+        // Trigger curriculum generation in the background!
+        const systemMsg: Message = {
+          id: (Date.now() + 2).toString(),
+          text: `[SYSTEM: Generating custom modules for "${triggerTopic}"... Check your dashboard shortly!]`,
+          sender: 'ai',
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, systemMsg]);
+        
+        generateCurriculum({
+          topic: triggerTopic,
+          userName: user.name,
+          userId: user.id,
+          persona: user.persona,
+          age: user.age
+        }).catch(err => console.error('Auto-generate failed:', err));
+      }
+      
     } catch (error) {
       console.error(error);
       const errorResponse: Message = {

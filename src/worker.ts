@@ -215,7 +215,7 @@ router.post("/api/ai-chat", async (request) => {
   const env = (request as any).env as { DB: D1Database };
   try {
     const body = await request.json() as any;
-    const { message, userName, persona, age, learningFocus, conversationId, aiAssistantRole } = body;
+    const { message, history, userName, persona, age, learningFocus, conversationId, aiAssistantRole } = body;
     const userId = request.headers.get("X-Google-User-Id") || userName?.toLowerCase() || "aba";
     const apiKey = process.env.GEMINI_API_KEY;
 
@@ -259,6 +259,7 @@ YOUR CAPABILITIES & RULES:
    - Understand their goals (academic, professional, career pivot)
    - Suggest a structured learning path
    - Break it into concrete modules they could work through
+   - IMPORTANT: If the user explicitly asks to learn something or study a topic, you MUST append this exact tag to the end of your response: [MODULE_TRIGGER: <topic>] (replace <topic> with the actual topic). This will signal the system to automatically generate their modules!
 5. Adapt your communication style to the user's age:
    - For young children (age < 7): Use simple words, emojis, and playful language
    - For children (age 7-12): Be encouraging, use examples, make it fun
@@ -275,10 +276,12 @@ YOUR CAPABILITIES & RULES:
 
     for (const model of models) {
       const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const geminiContents = history && history.length > 0
+        ? history.map((m: any) => ({ role: m.role, parts: [{ text: m.content }] }))
+        : [{ role: "user", parts: [{ text: message }] }];
+        
       const geminiPayload = {
-        contents: [
-          { role: "user", parts: [{ text: message }] }
-        ],
+        contents: geminiContents,
         systemInstruction: { parts: [{ text: systemPrompt }] },
         generationConfig: {
           temperature: 0.8,
@@ -342,7 +345,9 @@ YOUR CAPABILITIES & RULES:
                 model: orModel,
                 messages: [
                   { role: "system", content: systemPrompt },
-                  { role: "user", content: message }
+                  ...(history && history.length > 0 
+                    ? history.map((m: any) => ({ role: m.role === 'model' ? 'assistant' : 'user', content: m.content }))
+                    : [{ role: "user", content: message }])
                 ],
                 max_tokens: 1024,
                 temperature: 0.8

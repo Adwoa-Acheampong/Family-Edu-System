@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Activity, Database, Loader2, Target, Zap } from 'lucide-react';
 import { User } from '../types';
 import { useSystemStatus, useDriveUsage, useAnalytics } from '../hooks/useLiveData';
+import { getModules } from '../lib/api';
 import { cn } from '../utils';
 
 export function ArchitectDashboard({ user }: { user: User }) {
@@ -10,6 +11,13 @@ export function ArchitectDashboard({ user }: { user: User }) {
   const status = useSystemStatus();
   const drive = useDriveUsage(user.id);
   const analytics = useAnalytics(user.id);
+  const [modules, setModules] = React.useState<any[]>([]);
+
+  React.useEffect(() => {
+    getModules(user.id)
+      .then(data => setModules(data.modules || []))
+      .catch(err => console.error(err));
+  }, [user.id]);
 
   const latency = status.data?.latencyMs;
   const networkLabel =
@@ -209,6 +217,37 @@ export function ArchitectDashboard({ user }: { user: User }) {
             Open full analytics →
           </button>
         </div>
+      </div>
+      
+      {/* Generated Modules Widget */}
+      <div className="mt-8 bg-[#0a0a0a] border border-white/10 rounded-3xl p-8 relative overflow-hidden">
+        <div className="flex items-center justify-between mb-8 border-b border-white/5 pb-4">
+          <h2 className="text-[11px] font-bold tracking-[0.2em] text-white uppercase">Your AI Modules</h2>
+          <button
+            type="button"
+            onClick={() => getModules(user.id).then(data => setModules(data.modules || []))}
+            className="text-[11px] font-bold tracking-widest text-[var(--theme-color)] uppercase hover:underline"
+          >
+            Refresh
+          </button>
+        </div>
+        
+        {modules.length === 0 ? (
+          <p className="text-sm text-gray-500">No modules generated yet. Use the AI Assistant to create a study plan.</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {modules.map((m, i) => (
+              <div key={m.id || i} className="p-5 bg-black border border-white/5 rounded-2xl flex flex-col gap-2">
+                <div className="text-[10px] text-[var(--theme-color)] uppercase tracking-widest font-bold">Module {i + 1}</div>
+                <h3 className="text-white text-lg font-medium">{m.title}</h3>
+                <p className="text-gray-500 text-xs flex-1 line-clamp-3">{m.description}</p>
+                <div className="mt-2 text-[10px] text-gray-400 bg-white/5 px-2 py-1 rounded inline-block w-fit">
+                  {m.estimated_hours}h estimated
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
