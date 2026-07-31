@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  engine-room:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - VECTOR_BACKEND=chromadb
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+      - chromadb
+  
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+  
+  chromadb:
+    image: chromadb/chroma:latest
+    volumes:
+      - chroma_data:/chroma
+    ports:
+      - "8001:8000"
+
+volumes:
+  redis_data:
+  chroma_data:

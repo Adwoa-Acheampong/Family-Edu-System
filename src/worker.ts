@@ -577,7 +577,11 @@ export default {
     const url = new URL(request.url);
     if (!url.pathname.startsWith('/api/')) {
       if (env.ASSETS) {
-        return env.ASSETS.fetch(new Request(new URL('/', request.url).toString(), request));
+        const response = await env.ASSETS.fetch(request);
+        if (response.status === 404) {
+          return env.ASSETS.fetch(new Request(new URL('/', request.url).toString(), request));
+        }
+        return response;
       }
     }
     

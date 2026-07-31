@@ -1,18 +1,64 @@
-// src/worker.ts
-import { Router } from "itty-router";
+var __defProp = Object.defineProperty;
+var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
-// src/db.ts
+// .wrangler/tmp/bundle-pb4nua/checked-fetch.js
+var urls = /* @__PURE__ */ new Set();
+function checkURL(request, init) {
+  const url = request instanceof URL ? request : new URL(
+    (typeof request === "string" ? new Request(request, init) : request).url
+  );
+  if (url.port && url.port !== "443" && url.protocol === "https:") {
+    if (!urls.has(url.toString())) {
+      urls.add(url.toString());
+      console.warn(
+        `WARNING: known issue with \`fetch()\` requests to custom HTTPS ports in published Workers:
+ - ${url.toString()} - the custom port will be ignored when the Worker is published using the \`wrangler deploy\` command.
+`
+      );
+    }
+  }
+}
+__name(checkURL, "checkURL");
+globalThis.fetch = new Proxy(globalThis.fetch, {
+  apply(target, thisArg, argArray) {
+    const [request, init] = argArray;
+    checkURL(request, init);
+    return Reflect.apply(target, thisArg, argArray);
+  }
+});
+
+// node_modules/itty-router/index.mjs
+var e = /* @__PURE__ */ __name(({ base: e2 = "", routes: t = [], ...o2 } = {}) => ({ __proto__: new Proxy({}, { get: /* @__PURE__ */ __name((o3, s2, r, n) => "handle" == s2 ? r.fetch : (o4, ...a) => t.push([s2.toUpperCase?.(), RegExp(`^${(n = (e2 + o4).replace(/\/+(\/|$)/g, "$1")).replace(/(\/?\.?):(\w+)\+/g, "($1(?<$2>*))").replace(/(\/?\.?):(\w+)/g, "($1(?<$2>[^$1/]+?))").replace(/\./g, "\\.").replace(/(\/?)\*/g, "($1.*)?")}/*$`), a, n]) && r, "get") }), routes: t, ...o2, async fetch(e3, ...o3) {
+  let s2, r, n = new URL(e3.url), a = e3.query = { __proto__: null };
+  for (let [e4, t2] of n.searchParams) a[e4] = a[e4] ? [].concat(a[e4], t2) : t2;
+  for (let [a2, c2, i2, l2] of t) if ((a2 == e3.method || "ALL" == a2) && (r = n.pathname.match(c2))) {
+    e3.params = r.groups || {}, e3.route = l2;
+    for (let t2 of i2) if (null != (s2 = await t2(e3.proxy ?? e3, ...o3))) return s2;
+  }
+} }), "e");
+var o = /* @__PURE__ */ __name((e2 = "text/plain; charset=utf-8", t) => (o2, { headers: s2 = {}, ...r } = {}) => void 0 === o2 || "Response" === o2?.constructor.name ? o2 : new Response(t ? t(o2) : o2, { headers: { "content-type": e2, ...s2.entries ? Object.fromEntries(s2) : s2 }, ...r }), "o");
+var s = o("application/json; charset=utf-8", JSON.stringify);
+var c = o("text/plain; charset=utf-8", String);
+var i = o("text/html");
+var l = o("image/jpeg");
+var p = o("image/png");
+var d = o("image/webp");
+
+// dist/worker.mjs
 async function getAssignments(userId, db) {
   const result = await db.prepare("SELECT * FROM assignments WHERE user_id = ? ORDER BY due_date ASC").bind(userId).all();
   return result.results;
 }
+__name(getAssignments, "getAssignments");
 async function updateAssignmentStatus(id, status, db) {
   await db.prepare("UPDATE assignments SET status = ? WHERE id = ?").bind(status, id).run();
 }
+__name(updateAssignmentStatus, "updateAssignmentStatus");
 async function getModules(userId, db) {
   const result = await db.prepare("SELECT * FROM modules WHERE user_id = ? ORDER BY order_index ASC").bind(userId).all();
   return result.results;
 }
+__name(getModules, "getModules");
 async function createModule(mod, db) {
   await db.prepare(
     `INSERT INTO modules (id, user_id, title, description, objectives, resources, order_index, status, estimated_hours)
@@ -29,16 +75,19 @@ async function createModule(mod, db) {
     mod.estimated_hours
   ).run();
 }
+__name(createModule, "createModule");
 async function updateModuleStatus(id, status, db) {
   const completedAt = status === "COMPLETED" ? (/* @__PURE__ */ new Date()).toISOString() : null;
   await db.prepare("UPDATE modules SET status = ?, completed_at = ? WHERE id = ?").bind(status, completedAt, id).run();
 }
+__name(updateModuleStatus, "updateModuleStatus");
 async function logProgress(entry, db) {
   await db.prepare(
     `INSERT INTO progress (id, user_id, module_id, assignment_id, action, xp_earned)
      VALUES (?, ?, ?, ?, ?, ?)`
   ).bind(entry.id, entry.user_id, entry.module_id, entry.assignment_id, entry.action, entry.xp_earned).run();
 }
+__name(logProgress, "logProgress");
 async function getAnalyticsData(userId, db) {
   const assignments = await db.prepare("SELECT * FROM assignments WHERE user_id = ?").bind(userId).all();
   const modules = await db.prepare("SELECT * FROM modules WHERE user_id = ?").bind(userId).all();
@@ -50,24 +99,24 @@ async function getAnalyticsData(userId, db) {
   const allProgress = progress.results;
   const completed = allAssignments.filter((a) => a.status === "GRADED" || a.status === "SUBMITTED").length + allModules.filter((m) => m.status === "COMPLETED").length;
   const pending = allAssignments.filter((a) => a.status === "PENDING").length + allModules.filter((m) => m.status !== "COMPLETED").length;
-  const totalXp = allProgress.reduce((sum, p) => sum + (p.xp_earned || 0), 0);
+  const totalXp = allProgress.reduce((sum, p2) => sum + (p2.xp_earned || 0), 0);
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const xpByDay = days.map((day) => ({ day, xp: 0 }));
-  for (const p of allProgress) {
-    const d = new Date(p.created_at);
-    const dayIndex = d.getDay();
-    xpByDay[dayIndex].xp += p.xp_earned || 0;
+  for (const p2 of allProgress) {
+    const d2 = new Date(p2.created_at);
+    const dayIndex = d2.getDay();
+    xpByDay[dayIndex].xp += p2.xp_earned || 0;
   }
-  const uniqueDays = new Set(allProgress.map((p) => p.created_at?.substring(0, 10)));
+  const uniqueDays = new Set(allProgress.map((p2) => p2.created_at?.substring(0, 10)));
   let streak = 0;
   const today = /* @__PURE__ */ new Date();
-  for (let i = 0; i < 30; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const key = d.toISOString().substring(0, 10);
+  for (let i2 = 0; i2 < 30; i2++) {
+    const d2 = new Date(today);
+    d2.setDate(d2.getDate() - i2);
+    const key = d2.toISOString().substring(0, 10);
     if (uniqueDays.has(key)) {
       streak++;
-    } else if (i > 0) {
+    } else if (i2 > 0) {
       break;
     }
   }
@@ -83,13 +132,14 @@ async function getAnalyticsData(userId, db) {
       { subject: "Assignments", count: allAssignments.length },
       { subject: "Completed", count: completed }
     ],
-    curriculumMilestones: allModules.slice(0, 3).map((m, i) => ({
-      phase: i === 0 ? "NOW" : i === 1 ? "NEXT" : "LATER",
+    curriculumMilestones: allModules.slice(0, 3).map((m, i2) => ({
+      phase: i2 === 0 ? "NOW" : i2 === 1 ? "NEXT" : "LATER",
       title: m.title,
       description: m.status === "COMPLETED" ? "\u2705 Completed" : m.status === "IN_PROGRESS" ? "\u{1F504} In progress" : "\u23F3 Not started"
     }))
   };
 }
+__name(getAnalyticsData, "getAnalyticsData");
 async function saveOAuthToken(sessionId, token, db) {
   await db.prepare(`INSERT INTO oauth_sessions (session_id, access_token, refresh_token, expires_at, email, name)
     VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET
@@ -106,10 +156,12 @@ async function saveOAuthToken(sessionId, token, db) {
     token.name ?? null
   ).run();
 }
+__name(saveOAuthToken, "saveOAuthToken");
 async function getOAuthToken(sessionId, db) {
   const result = await db.prepare("SELECT * FROM oauth_sessions WHERE session_id = ?").bind(sessionId).first();
   return result;
 }
+__name(getOAuthToken, "getOAuthToken");
 async function callGoogleAPI(endpoint, accessToken, method = "GET", body) {
   const opts = {
     method,
@@ -126,6 +178,7 @@ async function callGoogleAPI(endpoint, accessToken, method = "GET", body) {
   }
   return res.json();
 }
+__name(callGoogleAPI, "callGoogleAPI");
 async function getDriveUsage(accessToken) {
   const data = await callGoogleAPI(
     "https://www.googleapis.com/drive/v3/about?fields=storageQuota",
@@ -136,6 +189,7 @@ async function getDriveUsage(accessToken) {
     totalBytes: parseInt(data.storageQuota?.limit || String(15 * 1024 ** 3))
   };
 }
+__name(getDriveUsage, "getDriveUsage");
 async function listDriveFiles(accessToken) {
   const data = await callGoogleAPI(
     "https://www.googleapis.com/drive/v3/files?pageSize=20&fields=files(id,name,mimeType,modifiedTime,size,webViewLink)&orderBy=modifiedTime desc",
@@ -143,6 +197,7 @@ async function listDriveFiles(accessToken) {
   );
   return data.files || [];
 }
+__name(listDriveFiles, "listDriveFiles");
 async function listClassroomCourses(accessToken) {
   const data = await callGoogleAPI(
     "https://classroom.googleapis.com/v1/courses?courseStates=ACTIVE&pageSize=20",
@@ -150,6 +205,7 @@ async function listClassroomCourses(accessToken) {
   );
   return data.courses || [];
 }
+__name(listClassroomCourses, "listClassroomCourses");
 async function listClassroomAssignments(courseId, accessToken) {
   const data = await callGoogleAPI(
     `https://classroom.googleapis.com/v1/courses/${courseId}/courseWork?pageSize=50`,
@@ -157,8 +213,7 @@ async function listClassroomAssignments(courseId, accessToken) {
   );
   return data.courseWork || [];
 }
-
-// src/worker.ts
+__name(listClassroomAssignments, "listClassroomAssignments");
 async function resolveAccessToken(request, db) {
   const authHeader = request.headers.get("Authorization");
   if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7);
@@ -169,6 +224,7 @@ async function resolveAccessToken(request, db) {
   }
   return null;
 }
+__name(resolveAccessToken, "resolveAccessToken");
 async function json(req) {
   try {
     return await req.json();
@@ -176,7 +232,8 @@ async function json(req) {
     return {};
   }
 }
-var router = Router();
+__name(json, "json");
+var router = e();
 router.get("/api/health", async (request) => {
   return new Response(JSON.stringify({ status: "ok", googleOAuthConfigured: !!process.env.GOOGLE_CLIENT_ID }), {
     headers: { "Content-Type": "application/json" },
@@ -358,7 +415,7 @@ router.post("/api/ai-chat", async (request) => {
     const assignmentContext = existingAssignments.length > 0 ? `
 
 Current modules/assignments on ${userName}'s dashboard:
-${existingAssignments.map((a, i) => `${i + 1}. "${a.title}" \u2014 Status: ${a.status}, Due: ${a.due_date}`).join("\n")}` : `
+${existingAssignments.map((a, i2) => `${i2 + 1}. "${a.title}" \u2014 Status: ${a.status}, Due: ${a.due_date}`).join("\n")}` : `
 
 ${userName} has no modules or assignments on their dashboard yet.`;
     const systemPrompt = `You are "${aiAssistantRole || "Strategic Advisor"}", a personalised AI tutor inside a Family Education Hub.
@@ -525,8 +582,8 @@ router.post("/api/generate-curriculum", async (request) => {
         debugLog = `Curriculum OpenRouter ${res.status}: ${errText.substring(0, 300)}`;
         console.error(debugLog);
       }
-    } catch (e) {
-      debugLog = `Curriculum OpenRouter error: ${e.message}`;
+    } catch (e2) {
+      debugLog = `Curriculum OpenRouter error: ${e2.message}`;
       console.error(debugLog);
     }
   }
@@ -536,8 +593,8 @@ router.post("/api/generate-curriculum", async (request) => {
     if (!Array.isArray(modules) || modules.length === 0) {
       return new Response(JSON.stringify({ curriculum: [], saved: 0, debug: debugLog || "AI returned empty or non-array", raw: cleaned.substring(0, 500) }), { headers: { "Content-Type": "application/json" } });
     }
-    for (let i = 0; i < modules.length; i++) {
-      const m = modules[i];
+    for (let i2 = 0; i2 < modules.length; i2++) {
+      const m = modules[i2];
       await createModule({
         id: crypto.randomUUID(),
         user_id: uid,
@@ -545,7 +602,7 @@ router.post("/api/generate-curriculum", async (request) => {
         description: m.description || "",
         objectives: m.objectives || "",
         resources: m.resources || "",
-        order_index: i,
+        order_index: i2,
         status: "NOT_STARTED",
         estimated_hours: m.estimated_hours || 1
       }, env.DB);
@@ -662,17 +719,190 @@ var worker_default = {
     const url = new URL(request.url);
     if (!url.pathname.startsWith("/api/")) {
       if (env.ASSETS) {
-        const response2 = await env.ASSETS.fetch(request);
-        if (response2.status === 404) {
-          return env.ASSETS.fetch(new Request(new URL("/", request.url).toString(), request));
-        }
-        return response2;
+        return env.ASSETS.fetch(new Request(new URL("/", request.url).toString(), request));
       }
     }
     return new Response("Not Found", { status: 404 });
   }
 };
-export {
-  worker_default as default
+
+// ../../../AppData/Roaming/npm/node_modules/wrangler/templates/middleware/middleware-ensure-req-body-drained.ts
+var drainBody = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx) => {
+  try {
+    return await middlewareCtx.next(request, env);
+  } finally {
+    try {
+      if (request.body !== null && !request.bodyUsed) {
+        const reader = request.body.getReader();
+        while (!(await reader.read()).done) {
+        }
+      }
+    } catch (e2) {
+      console.error("Failed to drain the unused request body.", e2);
+    }
+  }
+}, "drainBody");
+var middleware_ensure_req_body_drained_default = drainBody;
+
+// ../../../AppData/Roaming/npm/node_modules/wrangler/templates/middleware/middleware-miniflare3-json-error.ts
+function reduceError(e2) {
+  return {
+    name: e2?.name,
+    message: e2?.message ?? String(e2),
+    stack: e2?.stack,
+    cause: e2?.cause === void 0 ? void 0 : reduceError(e2.cause)
+  };
+}
+__name(reduceError, "reduceError");
+var jsonError = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx) => {
+  try {
+    return await middlewareCtx.next(request, env);
+  } catch (e2) {
+    const error = reduceError(e2);
+    const body = JSON.stringify(error);
+    const headers = {
+      "Content-Type": "application/json",
+      "MF-Experimental-Error-Stack": "true"
+    };
+    const encoded = encodeURIComponent(body);
+    if (encoded.length <= 8192) {
+      headers["MF-Experimental-Error-Stack-Payload"] = encoded;
+    }
+    return new Response(body, { status: 500, headers });
+  }
+}, "jsonError");
+var middleware_miniflare3_json_error_default = jsonError;
+
+// .wrangler/tmp/bundle-pb4nua/middleware-insertion-facade.js
+var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
+  middleware_ensure_req_body_drained_default,
+  middleware_miniflare3_json_error_default
+];
+var middleware_insertion_facade_default = worker_default;
+
+// ../../../AppData/Roaming/npm/node_modules/wrangler/templates/middleware/common.ts
+var __facade_middleware__ = [];
+function __facade_register__(...args) {
+  __facade_middleware__.push(...args.flat());
+}
+__name(__facade_register__, "__facade_register__");
+function __facade_invokeChain__(request, env, ctx, dispatch, middlewareChain) {
+  const [head, ...tail] = middlewareChain;
+  const middlewareCtx = {
+    dispatch,
+    next(newRequest, newEnv) {
+      return __facade_invokeChain__(newRequest, newEnv, ctx, dispatch, tail);
+    }
+  };
+  return head(request, env, ctx, middlewareCtx);
+}
+__name(__facade_invokeChain__, "__facade_invokeChain__");
+function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
+  return __facade_invokeChain__(request, env, ctx, dispatch, [
+    ...__facade_middleware__,
+    finalMiddleware
+  ]);
+}
+__name(__facade_invoke__, "__facade_invoke__");
+
+// .wrangler/tmp/bundle-pb4nua/middleware-loader.entry.ts
+var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
+  constructor(scheduledTime, cron, noRetry) {
+    this.scheduledTime = scheduledTime;
+    this.cron = cron;
+    this.#noRetry = noRetry;
+  }
+  static {
+    __name(this, "__Facade_ScheduledController__");
+  }
+  #noRetry;
+  noRetry() {
+    if (!(this instanceof ___Facade_ScheduledController__)) {
+      throw new TypeError("Illegal invocation");
+    }
+    this.#noRetry();
+  }
 };
-//# sourceMappingURL=worker.mjs.map
+function wrapExportedHandler(worker) {
+  if (__INTERNAL_WRANGLER_MIDDLEWARE__ === void 0 || __INTERNAL_WRANGLER_MIDDLEWARE__.length === 0) {
+    return worker;
+  }
+  for (const middleware of __INTERNAL_WRANGLER_MIDDLEWARE__) {
+    __facade_register__(middleware);
+  }
+  const fetchDispatcher = /* @__PURE__ */ __name(function(request, env, ctx) {
+    if (worker.fetch === void 0) {
+      throw new Error("Handler does not export a fetch() function.");
+    }
+    return worker.fetch(request, env, ctx);
+  }, "fetchDispatcher");
+  return {
+    ...worker,
+    fetch(request, env, ctx) {
+      const dispatcher = /* @__PURE__ */ __name(function(type, init) {
+        if (type === "scheduled" && worker.scheduled !== void 0) {
+          const controller = new __Facade_ScheduledController__(
+            Date.now(),
+            init.cron ?? "",
+            () => {
+            }
+          );
+          return worker.scheduled(controller, env, ctx);
+        }
+      }, "dispatcher");
+      return __facade_invoke__(request, env, ctx, dispatcher, fetchDispatcher);
+    }
+  };
+}
+__name(wrapExportedHandler, "wrapExportedHandler");
+function wrapWorkerEntrypoint(klass) {
+  if (__INTERNAL_WRANGLER_MIDDLEWARE__ === void 0 || __INTERNAL_WRANGLER_MIDDLEWARE__.length === 0) {
+    return klass;
+  }
+  for (const middleware of __INTERNAL_WRANGLER_MIDDLEWARE__) {
+    __facade_register__(middleware);
+  }
+  return class extends klass {
+    #fetchDispatcher = /* @__PURE__ */ __name((request, env, ctx) => {
+      this.env = env;
+      this.ctx = ctx;
+      if (super.fetch === void 0) {
+        throw new Error("Entrypoint class does not define a fetch() function.");
+      }
+      return super.fetch(request);
+    }, "#fetchDispatcher");
+    #dispatcher = /* @__PURE__ */ __name((type, init) => {
+      if (type === "scheduled" && super.scheduled !== void 0) {
+        const controller = new __Facade_ScheduledController__(
+          Date.now(),
+          init.cron ?? "",
+          () => {
+          }
+        );
+        return super.scheduled(controller);
+      }
+    }, "#dispatcher");
+    fetch(request) {
+      return __facade_invoke__(
+        request,
+        this.env,
+        this.ctx,
+        this.#dispatcher,
+        this.#fetchDispatcher
+      );
+    }
+  };
+}
+__name(wrapWorkerEntrypoint, "wrapWorkerEntrypoint");
+var WRAPPED_ENTRY;
+if (typeof middleware_insertion_facade_default === "object") {
+  WRAPPED_ENTRY = wrapExportedHandler(middleware_insertion_facade_default);
+} else if (typeof middleware_insertion_facade_default === "function") {
+  WRAPPED_ENTRY = wrapWorkerEntrypoint(middleware_insertion_facade_default);
+}
+var middleware_loader_entry_default = WRAPPED_ENTRY;
+export {
+  __INTERNAL_WRANGLER_MIDDLEWARE__,
+  middleware_loader_entry_default as default
+};
+//# sourceMappingURL=worker.js.map
