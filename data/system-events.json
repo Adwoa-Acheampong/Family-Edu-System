@@ -1,0 +1,12 @@
+[
+  {
+    "time": "00:36:16",
+    "event": "Node bridge online",
+    "status": "SUCCESS"
+  },
+  {
+    "time": "00:36:15",
+    "event": "System routes registered",
+    "status": "SUCCESS"
+  }
+]
