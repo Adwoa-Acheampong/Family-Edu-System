@@ -58,19 +58,68 @@ logger = logging.getLogger("engine_room")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Application lifespan manager with enterprise service initialization."""
     logger.info("Engine Room starting up...")
+    
+    # Initialize database
     try:
         await init_db()
     except Exception as e:
         logger.warning("DB init deferred/failed: %s", e)
+    
+    # Check API configurations
     gemini = bool(os.environ.get("GEMINI_API_KEY", "").strip())
+    qwen = bool(os.environ.get("QWEN_API_KEY", "").strip())
+    
     logger.info(
         "OCR backend: Gemini Vision (%s)",
         "ready" if gemini else "GEMINI_API_KEY not set — OCR will 503 until configured",
     )
+    
+    if qwen:
+        logger.info("Qwen API configured for agent inference (enterprise mode)")
+    else:
+        logger.info("Using Gemini for agent inference (Qwen not configured)")
+    
+    # Initialize task queue for async operations
+    try:
+        from services.task_queue import TaskQueueManager
+        app.state.task_manager = TaskQueueManager(num_workers=3)
+        await app.state.task_manager.__aenter__()
+        logger.info("Async task queue initialized with 3 workers")
+    except Exception as e:
+        logger.warning("Task queue initialization failed: %s", e)
+        app.state.task_manager = None
+    
+    # Initialize vector store for RAG
+    try:
+        from services.vector_db import create_vector_store, VectorStoreConfig
+        vector_backend = os.environ.get("VECTOR_BACKEND", "memory").lower()
+        config = VectorStoreConfig(backend=vector_backend)
+        app.state.vector_store = create_vector_store(config)
+        await app.state.vector_store.initialize()
+        logger.info("Vector store initialized (backend=%s)", vector_backend)
+    except Exception as e:
+        logger.warning("Vector store initialization failed: %s", e)
+        app.state.vector_store = None
+    
+    # Initialize agent orchestrator
+    try:
+        from services.orchestrator import create_enterprise_agents
+        qwen_key = os.environ.get("QWEN_API_KEY")
+        app.state.agents = create_enterprise_agents(qwen_api_key=qwen_key)
+        logger.info("Enterprise agent orchestrator initialized")
+    except Exception as e:
+        logger.warning("Agent orchestrator initialization failed: %s", e)
+        app.state.agents = None
+    
     logger.info("Engine Room ready")
     yield
+    
+    # Cleanup on shutdown
     logger.info("Engine Room shutting down...")
+    if hasattr(app.state, 'task_manager') and app.state.task_manager:
+        await app.state.task_manager.__aexit__(None, None, None)
 
 
 app = FastAPI(
