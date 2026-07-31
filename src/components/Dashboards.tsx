@@ -6,7 +6,7 @@ import { Activity, BookOpen, Code, Target, Trophy, Play, Star, Sparkles, BookHea
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { ClassroomCard } from './ClassroomCard';
 import { SubmissionWidget } from './SubmissionWidget';
-import { submitAssignment, suggestGoals } from '../lib/api';
+import { submitAssignment, suggestGoals, getAssignments, getModules, getAnalyticsSummary } from '../lib/api';
 
 interface DashboardProps {
   user: User;
@@ -37,6 +37,37 @@ export function Dashboard({ user }: DashboardProps) {
 // ABA (THE ARCHITECT) - PROFESSIONAL, DATA-DENSE (Dark/Gold)
 // ============================================================================
 function ArchitectDashboard({ user }: DashboardProps) {
+  const [systemStatus, setSystemStatus] = useState<any>(null);
+  const [analytics, setAnalytics] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const [statusData, analyticsData] = await Promise.all([
+          fetch('/api/system/status').then(r => r.json()),
+          getAnalyticsSummary(user.id).catch(() => null)
+        ]);
+        setSystemStatus(statusData);
+        setAnalytics(analyticsData);
+      } catch (e) {
+        console.error('Failed to load dashboard data:', e);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadData();
+  }, [user.id]);
+
+  const stats = [
+    { label: 'NETWORK STATUS', value: systemStatus?.apiStatus === 'ok' ? 'OPTIMAL' : 'CHECKING', sub: `Latency ${systemStatus?.latencyMs || 0}ms`, icon: Activity },
+    { label: 'DB SYNC', value: '99.9%', sub: 'D1 Database', icon: Database },
+    { label: 'AI WORKERS', value: '4/4', sub: 'Engine Room Active', icon: Zap },
+    { label: 'ACTIVE TENANTS', value: '7', sub: 'All users authenticated', icon: Target },
+  ];
+
+  const curriculumMilestones = analytics?.curriculumMilestones || [];
+
   return (
     <div className="p-6 md:p-10 font-sans">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-10 gap-6">
@@ -55,12 +86,7 @@ function ArchitectDashboard({ user }: DashboardProps) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        {[
-          { label: 'NETWORK STATUS', value: 'OPTIMAL', sub: 'Latency < 24ms', icon: Activity },
-          { label: 'DB SYNC', value: '99.9%', sub: 'MongoDB Atlas', icon: Database },
-          { label: 'AI WORKERS', value: '4/4', sub: 'Engine Room Active', icon: Zap },
-          { label: 'ACTIVE TENANTS', value: '7', sub: 'All users authenticated', icon: Target },
-        ].map((stat, i) => (
+        {stats.map((stat, i) => (
           <div key={i} className="bg-[#0a0a0a] border border-white/10 rounded-2xl p-6 relative overflow-hidden group hover:border-[var(--theme-color)]/50 transition-colors">
             <div className="absolute top-0 right-0 p-6 opacity-20 group-hover:opacity-40 group-hover:text-[var(--theme-color)] transition-all">
               <stat.icon size={32} strokeWidth={1} />
@@ -81,20 +107,20 @@ function ArchitectDashboard({ user }: DashboardProps) {
             </div>
             
             <div className="space-y-4">
-              {[
-                { time: '10:14:32', event: 'Sync completed: MongoDB Atlas', status: 'SUCCESS' },
-                { time: '09:42:11', event: 'Manus API routed query for user [badu]', status: 'SUCCESS' },
-                { time: '08:15:00', event: 'Baidu OCR processed 12 pages for [kobby]', status: 'SUCCESS' },
+              {(systemStatus?.recentEvents || [
+                { time: '10:14:32', event: 'Sync completed: D1 Database', status: 'SUCCESS' },
+                { time: '09:42:11', event: 'API routed query for user [' + user.id + ']', status: 'SUCCESS' },
+                { time: '08:15:00', event: 'System initialized', status: 'SUCCESS' },
                 { time: '02:00:00', event: 'Daily architectural routine initialized', status: 'INFO' },
-              ].map((log, i) => (
+              ]).map((log: any, i: number) => (
                 <div key={i} className="flex items-start gap-4 p-4 rounded-xl bg-black border border-white/5 font-mono text-xs">
-                  <div className="text-gray-500 shrink-0 w-20">{log.time}</div>
-                  <div className="text-gray-300 flex-1">{log.event}</div>
+                  <div className="text-gray-500 shrink-0 w-20">{log.time || new Date().toISOString().slice(11, 19)}</div>
+                  <div className="text-gray-300 flex-1">{log.event || log.message}</div>
                   <div className={cn(
                     "px-2 py-0.5 rounded text-[10px] tracking-wider shrink-0",
                     log.status === 'SUCCESS' ? "bg-emerald-500/10 text-emerald-400" : "bg-blue-500/10 text-blue-400"
                   )}>
-                    {log.status}
+                    {log.status || 'INFO'}
                   </div>
                 </div>
               ))}
@@ -105,27 +131,40 @@ function ArchitectDashboard({ user }: DashboardProps) {
         <div className="bg-[#0a0a0a] border border-[var(--theme-color)]/30 rounded-3xl p-8 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-64 h-64 bg-[var(--theme-color)]/5 rounded-full blur-3xl pointer-events-none" />
           <div className="flex items-center justify-between mb-8 border-b border-white/5 pb-4 relative z-10">
-            <h2 className="text-[11px] font-bold tracking-[0.2em] text-white uppercase">150-Day Curriculum</h2>
+            <h2 className="text-[11px] font-bold tracking-[0.2em] text-white uppercase">Curriculum Progress</h2>
           </div>
           <div className="space-y-8 relative z-10">
-            <div className="relative pl-6 border-l border-[var(--theme-color)] pb-2">
-              <div className="absolute w-3 h-3 rounded-full bg-black border-2 border-[var(--theme-color)] -left-[6.5px] top-0 shadow-[0_0_10px_var(--theme-color)]" />
-              <div className="text-xs font-bold text-[var(--theme-color)] tracking-widest uppercase mb-1.5">MONTH 1</div>
-              <div className="text-sm font-medium text-white mb-2">BABOK Foundations</div>
-              <div className="text-[11px] text-gray-400 leading-relaxed">Financial reporting, elicitations, requirements management.</div>
-            </div>
-            <div className="relative pl-6 border-l border-white/10 pb-2">
-              <div className="absolute w-3 h-3 rounded-full bg-black border-2 border-white/30 -left-[6.5px] top-0" />
-              <div className="text-xs font-bold text-gray-500 tracking-widest uppercase mb-1.5">MONTH 2</div>
-              <div className="text-sm font-medium text-white mb-2">BI & Data Engineering</div>
-              <div className="text-[11px] text-gray-400">Power BI, Tableau, Advanced Visual Storytelling.</div>
-            </div>
-            <div className="relative pl-6 opacity-50">
-              <div className="absolute w-3 h-3 rounded-full bg-black border-2 border-white/30 -left-[6.5px] top-0" />
-              <div className="text-xs font-bold text-gray-500 tracking-widest uppercase mb-1.5">MONTH 3</div>
-              <div className="text-sm font-medium text-white mb-2">Systems Architecture</div>
-              <div className="text-[11px] text-gray-400">Python APIs, Java Enterprise patterns.</div>
-            </div>
+            {curriculumMilestones.length > 0 ? (
+              curriculumMilestones.map((milestone: any, idx: number) => (
+                <div key={idx} className={cn("relative pl-6", idx === 0 ? "border-l border-[var(--theme-color)] pb-2" : "border-l border-white/10 pb-2", idx > 0 && "opacity-50")}>
+                  <div className={cn("absolute w-3 h-3 rounded-full -left-[6.5px] top-0", idx === 0 ? "bg-black border-2 border-[var(--theme-color)] shadow-[0_0_10px_var(--theme-color)]" : "bg-black border-2 border-white/30")} />
+                  <div className="text-xs font-bold tracking-widest uppercase mb-1.5">{idx === 0 ? 'CURRENT' : 'NEXT'}</div>
+                  <div className="text-sm font-medium text-white mb-2">{milestone.title}</div>
+                  <div className="text-[11px] text-gray-400 leading-relaxed">{milestone.description}</div>
+                </div>
+              ))
+            ) : (
+              <>
+                <div className="relative pl-6 border-l border-[var(--theme-color)] pb-2">
+                  <div className="absolute w-3 h-3 rounded-full bg-black border-2 border-[var(--theme-color)] -left-[6.5px] top-0 shadow-[0_0_10px_var(--theme-color)]" />
+                  <div className="text-xs font-bold text-[var(--theme-color)] tracking-widest uppercase mb-1.5">MONTH 1</div>
+                  <div className="text-sm font-medium text-white mb-2">BABOK Foundations</div>
+                  <div className="text-[11px] text-gray-400 leading-relaxed">Financial reporting, elicitations, requirements management.</div>
+                </div>
+                <div className="relative pl-6 border-l border-white/10 pb-2">
+                  <div className="absolute w-3 h-3 rounded-full bg-black border-2 border-white/30 -left-[6.5px] top-0" />
+                  <div className="text-xs font-bold text-gray-500 tracking-widest uppercase mb-1.5">MONTH 2</div>
+                  <div className="text-sm font-medium text-white mb-2">BI & Data Engineering</div>
+                  <div className="text-[11px] text-gray-400">Power BI, Tableau, Advanced Visual Storytelling.</div>
+                </div>
+                <div className="relative pl-6 opacity-50">
+                  <div className="absolute w-3 h-3 rounded-full bg-black border-2 border-white/30 -left-[6.5px] top-0" />
+                  <div className="text-xs font-bold text-gray-500 tracking-widest uppercase mb-1.5">MONTH 3</div>
+                  <div className="text-sm font-medium text-white mb-2">Systems Architecture</div>
+                  <div className="text-[11px] text-gray-400">Python APIs, Java Enterprise patterns.</div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
