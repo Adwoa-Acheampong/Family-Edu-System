@@ -29,6 +29,10 @@ from models.schemas import (
     CurriculumRequest,
     CurriculumResponse,
     DriveUsage,
+    GenerateCurriculumRequest,
+    GenerateCurriculumResponse,
+    GradeSubmissionRequest,
+    GradeSubmissionResponse,
     HealthResponse,
     LessonIngestRequest,
     LessonIngestResponse,
@@ -376,15 +380,149 @@ async def ai_chat(request: ChatRequest):
         raise HTTPException(status_code=502, detail=f"AI chat failed: {e}")
 
 
-@app.post("/v1/generate-curriculum", response_model=CurriculumResponse)
-async def generate_curriculum(request: CurriculumRequest):
-    from services.curriculum import generate_curriculum as curriculum_service
-
+@app.post("/v1/curriculum/generate", response_model=GenerateCurriculumResponse)
+async def generate_advanced_curriculum(
+    request: GenerateCurriculumRequest,
+    file: Optional[UploadFile] = File(None),
+):
+    """Generate a comprehensive curriculum from a text prompt or PDF upload.
+    
+    Uses Gemini 1.5 Pro to parse certification materials and create structured
+    learning paths with modules, projects, quizzes, and web-enriched resources.
+    
+    - **prompt**: Text description of what to generate (e.g., "Business Analyst Certification")
+    - **file**: Optional PDF file upload (e.g., BABOK Guide)
+    - **certificationName**: Name of the certification being prepared for
+    - **persona**: Learner persona (default: "Master")
+    
+    Returns a complete CurriculumTree with:
+    - Modules mapped to certification domains
+    - Reading guides with key concepts
+    - Practical real-world projects
+    - Exam-style quizzes
+    - Web resources and case studies
+    """
+    from services.curriculum_generator import (
+        generate_curriculum_from_prompt,
+        generate_curriculum_from_pdf,
+    )
+    from services.scraper import enrich_curriculum_modules
+    
     try:
-        return await curriculum_service(request)
+        # Handle PDF upload vs text prompt
+        if file and file.filename:
+            pdf_content = await file.read()
+            result = await generate_curriculum_from_pdf(
+                pdf_content=pdf_content,
+                filename=file.filename,
+                request=request,
+            )
+        elif request.prompt or request.certificationName:
+            result = await generate_curriculum_from_prompt(request)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Either a prompt or PDF file must be provided"
+            )
+        
+        # Enrich with web resources (optional, can be slow)
+        # In production, this might be done asynchronously
+        # curriculum_data = result.curriculum.model_dump()
+        # enriched_modules = await enrich_curriculum_modules(curriculum_data.get("modules", []))
+        # result.curriculum.modules = enriched_modules
+        
+        return result
+        
+    except RuntimeError as e:
+        if "GEMINI_API_KEY" in str(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Gemini API key not configured. Set GEMINI_API_KEY in environment."
+            )
+        logger.error("Curriculum generation failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"Curriculum generation failed: {e}")
+    except json.JSONDecodeError as e:
+        logger.error("Invalid JSON from AI: %s", e)
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to parse AI response: {e}"
+        )
     except Exception as e:
         logger.error("Curriculum generation failed: %s", e)
         raise HTTPException(status_code=502, detail=f"Curriculum generation failed: {e}")
+
+
+@app.post("/v1/grade-submission", response_model=GradeSubmissionResponse)
+async def grade_submission(
+    request: GradeSubmissionRequest,
+    authorization: Optional[str] = Header(None),
+    x_google_user_id: Optional[str] = Header(None, alias="X-Google-User-Id"),
+):
+    """Automatically grade a student submission using AI.
+    
+    Evaluates quiz responses or project submissions against grading rubrics,
+    provides detailed feedback, and optionally pushes grades to Google Classroom.
+    
+    - **assignmentId**: The assignment/coursework ID
+    - **courseId**: The course ID
+    - **submissionType**: Either "quiz" or "project"
+    - **submissionContent**: The student's answer or project description
+    - **attachments**: Optional list of Drive file IDs with submitted files
+    
+    Returns:
+    - Score and max score
+    - Detailed constructive feedback
+    - Strengths and areas for improvement
+    - XP earned for the dashboard
+    """
+    from services.grader import grade_submission as grader_service
+    
+    # Get access token for optional Classroom sync (lazy import to avoid circular deps)
+    access_token = None
+    if authorization and authorization.startswith("Bearer "):
+        try:
+            from auth.google_auth import resolve_access_token
+            bearer = authorization.removeprefix("Bearer ").strip()
+            access_token = await resolve_access_token(bearer, x_google_user_id)
+        except ImportError:
+            logger.warning("Google auth not available for token resolution")
+        except Exception as e:
+            logger.warning("Could not resolve access token for grading: %s", e)
+    
+    try:
+        # For now, we need to fetch the assignment rubric from somewhere
+        # In production, this would come from the curriculum tree or database
+        # For demonstration, we'll use a default rubric
+        default_rubric = {
+            "Completeness": 10,
+            "Accuracy": 10,
+            "Quality": 10,
+            "Professionalism": 5,
+        }
+        
+        assignment_description = (
+            f"Assignment {request.assignmentId} in course {request.courseId}. "
+            f"Submit your best work demonstrating mastery of the topic."
+        )
+        
+        return await grader_service(
+            request=request,
+            rubric=default_rubric,
+            assignment_description=assignment_description,
+            access_token=access_token,
+        )
+        
+    except RuntimeError as e:
+        if "GEMINI_API_KEY" in str(e):
+            raise HTTPException(
+                status_code=503,
+                detail="Gemini API key not configured for auto-grading"
+            )
+        logger.error("Grading failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"Grading failed: {e}")
+    except Exception as e:
+        logger.error("Grading failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"Grading failed: {e}")
 
 
 
