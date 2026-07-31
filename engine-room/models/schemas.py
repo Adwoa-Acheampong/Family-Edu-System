@@ -101,15 +101,23 @@ class DriveFolderEnsureResponse(BaseModel):
 
 # ─── AI Chat ─────────────────────────────────────────────────────────────
 
+class Message(BaseModel):
+    role: str = Field(..., description="Role: 'user' or 'assistant'")
+    content: str
+
+
 class ChatRequest(BaseModel):
     message: str
     persona: str = Field(..., description="Persona name, e.g. 'Architect', 'Explorer'")
     conversationId: Optional[str] = None
+    history: list[Message] = Field(default_factory=list, description="Conversation history")
 
 
 class ChatResponse(BaseModel):
     response: str
     conversationId: str
+    routed: bool = Field(default=False, description="True if message was routed to a command handler")
+    commandResult: Optional[dict[str, Any]] = Field(None, description="Result if routed to a command")
 
 
 # ─── OCR ─────────────────────────────────────────────────────────────────
@@ -148,6 +156,103 @@ class CurriculumResponse(BaseModel):
     studyMaterials: list[StudyMaterial]
     assignment: AssignmentDraft
 
+
+# ─── Advanced Curriculum Generator ───────────────────────────────────────
+
+class QuizQuestion(BaseModel):
+    id: str
+    type: str = Field(..., description="multiple_choice or scenario_based")
+    question: str
+    options: list[str] = Field(default_factory=list)
+    correctAnswer: str
+    explanation: str
+    points: int = 1
+
+
+class PracticalProject(BaseModel):
+    id: str
+    title: str
+    description: str
+    deliverables: list[str]
+    rubric: dict[str, int] = Field(..., description="Criteria -> max points")
+    estimatedHours: int = 5
+
+
+class ReadingGuide(BaseModel):
+    title: str
+    keyConcepts: list[str]
+    pages: Optional[str] = None
+    summary: str
+
+
+class ModuleTopic(BaseModel):
+    id: str
+    title: str
+    description: str
+    readingGuides: list[ReadingGuide] = Field(default_factory=list)
+    practicalProjects: list[PracticalProject] = Field(default_factory=list)
+    quizzes: list[QuizQuestion] = Field(default_factory=list)
+    webResources: list[dict[str, str]] = Field(default_factory=list, description="List of {title, url}")
+    caseStudies: list[dict[str, str]] = Field(default_factory=list, description="List of {title, url, summary}")
+
+
+class CurriculumModule(BaseModel):
+    id: str
+    title: str
+    description: str
+    domain: Optional[str] = None
+    topics: list[ModuleTopic]
+    estimatedHours: int = 10
+
+
+class CurriculumTree(BaseModel):
+    certificationName: str
+    sourceType: str = Field(..., description="text_prompt or pdf_upload")
+    sourceDescription: str
+    modules: list[CurriculumModule]
+    totalEstimatedHours: int = 0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class GenerateCurriculumRequest(BaseModel):
+    prompt: Optional[str] = Field(None, description="Text prompt for curriculum generation")
+    certificationName: Optional[str] = Field(None, description="Name of certification being prepared for")
+    persona: str = Field(default="Master", description="Learner persona")
+
+
+class GenerateCurriculumResponse(BaseModel):
+    curriculum: CurriculumTree
+    classroomSynced: bool = False
+    message: str
+
+
+# ─── Auto-Grader ─────────────────────────────────────────────────────────
+
+class GradingFeedback(BaseModel):
+    score: int
+    maxScore: int
+    feedback: str
+    strengths: list[str]
+    areasForImprovement: list[str]
+    xpEarned: int = 0
+
+
+class GradeSubmissionRequest(BaseModel):
+    assignmentId: str
+    courseId: str
+    submissionType: str = Field(..., description="quiz or project")
+    submissionContent: str = Field(..., description="Student's answer or project description")
+    attachments: list[str] = Field(default_factory=list, description="Optional file IDs from Drive")
+
+
+class GradeSubmissionResponse(BaseModel):
+    submissionId: str
+    grading: GradingFeedback
+    pushedToClassroom: bool = False
+    xpUpdated: bool = False
+
+
+# ─── Legacy Transcript Models ────────────────────────────────────────────
 
 class TranscriptSegment(BaseModel):
     text: str

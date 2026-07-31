@@ -1,28 +1,63 @@
-node_modules/
-build/
-dist/
-coverage/
-.DS_Store
-*.log
-.env*
-!.env.example
-
-# Runtime data (settings / events)
-data/
-
-# Python / Engine Room
+```
+# Python
 __pycache__/
-**/__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
 venv/
-engine-room/.venv/
-engine-room/engine_room.db
-engine-room/**/*.db
+.venv/
+.ENV
+.ENV.local
+.env
+.env.local
+.env.*
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git/
+.mypy_cache/
 .pytest_cache/
+.hypothesis/
 
-# Playwright / tunnel secrets
-scripts/playwright/.auth/
-**/storage_state.json
-**/.cloudflared/*.json
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+```
